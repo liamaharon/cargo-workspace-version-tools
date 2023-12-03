@@ -19,8 +19,6 @@ pub async fn exec(workspace_path: &PathBuf) {
 
     // Check every manifest
     for file_path in cargo_files {
-        println!();
-        log::info!("🔎 Checking {}...", file_path);
         match check_manifest(&client, &file_path).await {
             Ok(outcome) => match outcome {
                 Outcome::AlreadyUpdated(v) => {
@@ -37,7 +35,7 @@ pub async fn exec(workspace_path: &PathBuf) {
                     log::info!("💤 'publish = false' set, skipping")
                 }
             },
-            Err(e) => log::error!("Failed to check {}", e),
+            Err(e) => log::error!("❌ Failed to check {} {}", file_path, e),
         }
     }
 }
