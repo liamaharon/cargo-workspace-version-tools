@@ -15,32 +15,46 @@ pub async fn exec(workspace_path: &PathBuf) {
     // Find all Cargo.toml files in the workspace
     let cargo_files =
         find_manifest_paths(workspace_path, true).expect("Failed to find manifest paths");
-    log::info!("Found {} Cargo.toml files", cargo_files.len());
+    let total_files = cargo_files.len() as u32;
+    log::info!("Found {} Cargo.toml files", total_files);
 
     // Check every manifest
+    let mut cur_file = 1u32;
     for file_path in cargo_files {
+        let progress = format!("[{}/{}]", cur_file, total_files);
         match check_manifest(&client, &file_path).await {
-            Ok(outcome) => match outcome {
+            Ok((name, outcome)) => match outcome {
                 Outcome::AlreadyUpdated(v) => {
-                    log::info!("✅ Already up-to-date: {}", v);
+                    log::info!("{} ✅ `{}` already synced: {}", progress, name, v);
                 }
-                Outcome::Updated(file_path, new_version) => {
+                Outcome::Updated(prev_version, new_version) => {
                     log::info!(
-                        "📝 Updated Cargo.toml version to match crates.io ({} -> {})",
-                        file_path,
+                        "{} 📝 Updated `{}` Cargo.toml to match crates.io ({} -> {})",
+                        progress,
+                        name,
+                        prev_version,
                         new_version
                     );
                 }
                 Outcome::PublishFalse => {
-                    log::info!("💤 'publish = false' set, skipping")
+                    log::info!("{} 💤 `{}` publish = false, skipping", progress, name)
                 }
             },
-            Err(e) => log::error!("❌ Failed to check {} {}", file_path, e),
+            Err(e) => log::error!(
+                "{} ❌ Failed to check {} {}",
+                progress,
+                file_path.to_string_lossy().to_owned(),
+                e
+            ),
         }
+        cur_file += 1;
     }
 }
 
-async fn check_manifest(client: &AsyncClient, file_path: &str) -> Result<Outcome, Error> {
+async fn check_manifest(
+    client: &AsyncClient,
+    file_path: &PathBuf,
+) -> Result<(String, Outcome), Error> {
     // Read the Cargo.toml file
     let content = fs::read_to_string(&file_path)?;
     let mut doc = content.parse::<Document>()?;
@@ -53,14 +67,14 @@ async fn check_manifest(client: &AsyncClient, file_path: &str) -> Result<Outcome
 
     // Get package name
     let name = match package.get("name").and_then(|n| n.as_str()) {
-        Some(name) => name,
+        Some(name) => name.to_owned(),
         None => return Err(Error::InvalidPackageName),
     };
 
     // Check if publish = false
     if let Some(publish) = package.get("publish").and_then(|p| p.as_bool()) {
         if !publish {
-            return Ok(Outcome::PublishFalse);
+            return Ok((name, Outcome::PublishFalse));
         }
     }
 
@@ -71,26 +85,30 @@ async fn check_manifest(client: &AsyncClient, file_path: &str) -> Result<Outcome
     };
 
     // Get crates.io version
-    let crates_io_version = client.get_crate(name).await?.crate_data.max_version;
+    let crates_io_version = client
+        .get_crate(name.as_str())
+        .await?
+        .crate_data
+        .max_version;
 
     // If versions dont match, update local to match crates.io
     if local_version != crates_io_version {
         package["version"] = value(crates_io_version.clone());
         // Write the changes back to the Cargo.toml file and print a blank line
         fs::write(file_path, doc.to_string())?;
-        return Ok(Outcome::Updated(
-            local_version,
-            crates_io_version.to_owned(),
+        return Ok((
+            name,
+            Outcome::Updated(local_version, crates_io_version.to_owned()),
         ));
     };
 
-    Ok(Outcome::AlreadyUpdated(local_version.to_owned()))
+    Ok((name, Outcome::AlreadyUpdated(local_version.to_owned())))
 }
 
 fn find_manifest_paths<P: AsRef<Path>>(
     path: P,
     is_root: bool,
-) -> Result<Vec<String>, std::io::Error> {
+) -> Result<Vec<PathBuf>, std::io::Error> {
     let mut manifest_paths = Vec::new();
     for entry in fs::read_dir(&path)? {
         let entry = entry?;
@@ -106,7 +124,7 @@ fn find_manifest_paths<P: AsRef<Path>>(
             let mut sub_files = find_manifest_paths(&path, false)?;
             manifest_paths.append(&mut sub_files);
         } else if path.file_name() == Some(std::ffi::OsStr::new("Cargo.toml")) {
-            manifest_paths.push(path.to_string_lossy().into_owned());
+            manifest_paths.push(path);
         }
     }
     Ok(manifest_paths)
