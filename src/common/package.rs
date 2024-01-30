@@ -1,6 +1,7 @@
+use cargo_metadata::DependencyKind;
 use crates_io_api::AsyncClient;
 use semver::Version;
-use std::{fmt::Display, fs, path::PathBuf};
+use std::{collections::HashSet, fmt::Display, fs, path::PathBuf};
 use toml_edit::{Document, Table};
 
 /// A wrapper around the toml_edit Document with convenience methods
@@ -10,6 +11,12 @@ pub struct Package {
     doc: Document,
     /// Path
     path: PathBuf,
+    /// Direct, non-development dependencies that are also workspace members
+    pub direct_workspace_dependencies: HashSet<String>,
+    /// Direct and indirect non-development dependencies that are also workspace members
+    all_workspace_dependencies: Option<HashSet<String>>,
+    /// Direct and indirect non-development dependents that are also workspace members
+    all_workspace_dependents: Option<HashSet<String>>,
 }
 
 impl Display for Package {
@@ -79,7 +86,37 @@ impl Package {
         return true;
     }
 
-    pub fn new(path: &PathBuf) -> Result<Self, String> {
+    pub fn set_all_workspace_dependencies(
+        self: &mut Self,
+        all_workspace_dependencies: HashSet<String>,
+    ) {
+        self.all_workspace_dependencies = Some(all_workspace_dependencies);
+    }
+
+    pub fn all_workspace_dependencies(self: &Self) -> &HashSet<String> {
+        self.all_workspace_dependencies
+            .as_ref()
+            .expect("all_workspace_dependencies not set")
+    }
+
+    pub fn set_all_workspace_dependents(
+        self: &mut Self,
+        all_workspace_dependents: HashSet<String>,
+    ) {
+        self.all_workspace_dependents = Some(all_workspace_dependents);
+    }
+
+    pub fn all_workspace_dependents(self: &Self) -> &HashSet<String> {
+        self.all_workspace_dependents
+            .as_ref()
+            .expect("all_workspace_dependents not set")
+    }
+
+    pub fn new(
+        cargo_metadata_package: &cargo_metadata::Package,
+        workspace_members: &HashSet<String>,
+    ) -> Result<Self, String> {
+        let path = cargo_metadata_package.manifest_path.clone();
         let content = fs::read_to_string(&path).map_err(|e| {
             format!(
                 "Failed to read Cargo.toml for package at path {:?}: {}",
@@ -92,7 +129,18 @@ impl Package {
 
         Ok(Self {
             doc,
-            path: path.to_owned(),
+            direct_workspace_dependencies: cargo_metadata_package
+                .dependencies
+                .iter()
+                .filter(|d| {
+                    workspace_members.contains(d.name.as_str())
+                        && d.kind != DependencyKind::Development
+                })
+                .map(|d| d.name.clone())
+                .collect(),
+            path: path.into(),
+            all_workspace_dependents: None,
+            all_workspace_dependencies: None,
         })
     }
 }

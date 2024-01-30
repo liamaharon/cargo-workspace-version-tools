@@ -1,14 +1,15 @@
-use cargo_metadata::{Metadata, MetadataCommand};
-use std::{collections::HashMap, path::PathBuf};
-
 use super::package::Package;
+use crate::common::graph::{find_dependencies, find_dependents};
+use cargo_metadata::MetadataCommand;
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 /// An in-memory representation of the workspace members
 pub struct Workspace {
     /// Members of the workspace
     pub packages: HashMap<String, Package>,
-    /// Raw cargo metadata
-    metadata: Metadata,
 }
 
 impl Workspace {
@@ -19,31 +20,56 @@ impl Workspace {
             .exec()
             .map_err(|e| format!("Failed to load workspace at {:?}: {}", &cargo_toml_path, e))?;
 
-        let members = metadata.workspace_packages();
-
-        // Build packages
-        let packages = members
+        // Create the Packages
+        let cargo_metadata_members = metadata.workspace_packages();
+        let workspace_member_names = cargo_metadata_members
+            .iter()
+            .map(|p| p.name.clone())
+            .collect::<HashSet<_>>();
+        let mut workspace_package_map = cargo_metadata_members
             .iter()
             .map(|p| {
-                Package::new(&p.manifest_path.clone().into())
+                Package::new(&p, &workspace_member_names)
                     .map_err(|e| format!("Failed to load package at {:?}: {}", p, e))
             })
-            .collect::<Vec<Result<Package, String>>>();
+            .fold(HashMap::new(), |mut acc, package_result| {
+                match package_result {
+                    Ok(package) => {
+                        log::debug!("Loaded package {}", package);
+                        acc.insert(package.name(), package);
+                    }
+                    Err(e) => log::error!("{}", e),
+                };
+                acc
+            });
 
-        let mut package_map = HashMap::new();
-        for package in packages {
-            match package {
-                Ok(package) => {
-                    log::debug!("Loaded package {}", package);
-                    package_map.insert(package.name(), package);
-                }
-                Err(e) => log::error!("{}", e),
-            }
+        // Compute and set the dependencies and dependents
+        let start = std::time::Instant::now();
+        let workspace_deps_map = workspace_package_map
+            .iter()
+            .map(|(name, package)| {
+                (
+                    name.clone(),
+                    package
+                        .direct_workspace_dependencies
+                        .iter()
+                        .map(|dep| dep.clone())
+                        .collect::<HashSet<_>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        for (name, package) in workspace_package_map.iter_mut() {
+            package.set_all_workspace_dependencies(find_dependencies(&name, &workspace_deps_map));
+            package.set_all_workspace_dependents(find_dependents(&name, &workspace_deps_map));
         }
+        log::debug!(
+            "Computed dependencies and dependents in {}ms",
+            start.elapsed().as_millis()
+        );
 
         Ok(Workspace {
-            packages: package_map,
-            metadata,
+            packages: workspace_package_map,
         })
     }
 }

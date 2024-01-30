@@ -19,11 +19,11 @@ pub async fn exec(workspace: &mut Workspace) {
         match sync_manifest(&client, &mut package).await {
             Ok(outcome) => match outcome {
                 Outcome::AlreadyUpdated(v) => {
-                    log::info!("{} ✅ `{}` already synced: {}", progress, package.name(), v);
+                    log::info!("{} ✅ {} already synced: {}", progress, package.name(), v);
                 }
                 Outcome::Updated(prev_version, new_version) => {
                     log::info!(
-                        "{} 📝 Updated `{}` Cargo.toml to match crates.io ({} -> {})",
+                        "{} 📝 Updated {} Cargo.toml to match crates.io ({} -> {})",
                         progress,
                         package.name(),
                         prev_version,
@@ -32,7 +32,7 @@ pub async fn exec(workspace: &mut Workspace) {
                 }
                 Outcome::PublishFalse => {
                     log::info!(
-                        "{} 💤 `{}` publish = false, skipping",
+                        "{} 💤 {} publish = false, skipping",
                         progress,
                         package.name()
                     )
