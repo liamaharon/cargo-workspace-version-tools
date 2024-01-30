@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use env_logger::Env;
 
 mod commands;
+mod common;
 
 #[tokio::main]
 async fn main() {
@@ -24,7 +25,8 @@ async fn main() {
         Some(("sync", matches)) => {
             let workspace_path =
                 PathBuf::from(matches.get_one::<String>("path").expect("Path is required"));
-            commands::sync::exec(&workspace_path.into()).await;
+            let mut workspace = common::workspace::Workspace::new(&workspace_path).unwrap();
+            commands::sync::exec(&mut workspace).await;
         }
         _ => unreachable!("clap should ensure we don't get here"),
     };

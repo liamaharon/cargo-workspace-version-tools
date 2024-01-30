@@ -1,177 +1,65 @@
+use crate::common::package::Package;
+use crate::common::workspace::Workspace;
 use crates_io_api::AsyncClient;
-use std::path::Path;
-use std::{fs, path::PathBuf};
-use toml_edit::{value, Document};
+use semver::Version;
 
-pub async fn exec(workspace_path: &PathBuf) {
+pub async fn exec(workspace: &mut Workspace) {
     // Instantiate the client.
     log::info!("Instantiating crates.io api client");
     let client = AsyncClient::new(
-        "my-user-agent (liam.aharon@hotmail.com)",
+        "my-user-agent (liam@parity.io)",
         std::time::Duration::from_millis(1000),
     )
     .expect("Failed to create crates.io api client");
 
-    // Find all Cargo.toml files in the workspace
-    let cargo_files =
-        find_manifest_paths(workspace_path, true).expect("Failed to find manifest paths");
-    let total_files = cargo_files.len() as u32;
-    log::info!("Found {} Cargo.toml files", total_files);
-
     // Check every manifest
-    let mut cur_file = 1u32;
-    for file_path in cargo_files {
-        let progress = format!("[{}/{}]", cur_file, total_files);
-        match check_manifest(&client, &file_path).await {
-            Ok((name, outcome)) => match outcome {
+    let total_files = workspace.packages.len();
+    for (i, mut package) in workspace.packages.values_mut().enumerate() {
+        let progress = format!("[{}/{}]", i, total_files);
+        match sync_manifest(&client, &mut package).await {
+            Ok(outcome) => match outcome {
                 Outcome::AlreadyUpdated(v) => {
-                    log::info!("{} ✅ `{}` already synced: {}", progress, name, v);
+                    log::info!("{} ✅ `{}` already synced: {}", progress, package.name(), v);
                 }
                 Outcome::Updated(prev_version, new_version) => {
                     log::info!(
                         "{} 📝 Updated `{}` Cargo.toml to match crates.io ({} -> {})",
                         progress,
-                        name,
+                        package.name(),
                         prev_version,
                         new_version
                     );
                 }
                 Outcome::PublishFalse => {
-                    log::info!("{} 💤 `{}` publish = false, skipping", progress, name)
+                    log::info!(
+                        "{} 💤 `{}` publish = false, skipping",
+                        progress,
+                        package.name()
+                    )
                 }
             },
-            Err(e) => log::error!(
-                "{} ❌ Failed to check {} {}",
-                progress,
-                file_path.to_string_lossy().to_owned(),
-                e
-            ),
+            Err(e) => log::error!("{} ❌ Failed to check {} {}", progress, package.name(), e),
         }
-        cur_file += 1;
     }
 }
 
-async fn check_manifest(
-    client: &AsyncClient,
-    file_path: &PathBuf,
-) -> Result<(String, Outcome), Error> {
-    // Read the Cargo.toml file
-    let content = fs::read_to_string(&file_path)?;
-    let mut doc = content.parse::<Document>()?;
-
-    // Get package
-    let package = match doc.get_mut("package").and_then(|p| p.as_table_mut()) {
-        Some(package) => package,
-        None => return Err(Error::InvalidPackageTable),
-    };
-
-    // Get package name
-    let name = match package.get("name").and_then(|n| n.as_str()) {
-        Some(name) => name.to_owned(),
-        None => return Err(Error::InvalidPackageName),
-    };
-
-    // Check if publish = false
-    if let Some(publish) = package.get("publish").and_then(|p| p.as_bool()) {
-        if !publish {
-            return Ok((name, Outcome::PublishFalse));
-        }
+async fn sync_manifest(client: &AsyncClient, package: &mut Package) -> Result<Outcome, String> {
+    if !package.publish() {
+        return Ok(Outcome::PublishFalse);
     }
-
-    // Get version specified in the crate
-    let local_version = match package.get("version").and_then(|v| v.as_str()) {
-        Some(v) => v.to_owned(),
-        None => return Err(Error::InvalidPackageVersion),
-    };
-
-    // Get crates.io version
-    let crates_io_version = client
-        .get_crate(name.as_str())
-        .await?
-        .crate_data
-        .max_version;
-
+    let package_version_before = package.version();
+    let crates_version = package.crates_io_version(client).await?;
     // If versions dont match, update local to match crates.io
-    if local_version != crates_io_version {
-        package["version"] = value(crates_io_version.clone());
-        // Write the changes back to the Cargo.toml file and print a blank line
-        fs::write(file_path, doc.to_string())?;
-        return Ok((
-            name,
-            Outcome::Updated(local_version, crates_io_version.to_owned()),
-        ));
+    if package_version_before != crates_version {
+        package.set_version(&crates_version);
+        return Ok(Outcome::Updated(package_version_before, crates_version));
     };
 
-    Ok((name, Outcome::AlreadyUpdated(local_version.to_owned())))
-}
-
-fn find_manifest_paths<P: AsRef<Path>>(
-    path: P,
-    is_root: bool,
-) -> Result<Vec<PathBuf>, std::io::Error> {
-    let mut manifest_paths = Vec::new();
-    for entry in fs::read_dir(&path)? {
-        let entry = entry?;
-        let path = entry.path();
-
-        // Skip the 'target' directory only if it's in the root
-        if path.is_dir() {
-            if is_root && path.file_name() == Some(std::ffi::OsStr::new("target")) {
-                continue;
-            }
-
-            // Recursively search in directories, marking them as non-root
-            let mut sub_files = find_manifest_paths(&path, false)?;
-            manifest_paths.append(&mut sub_files);
-        } else if path.file_name() == Some(std::ffi::OsStr::new("Cargo.toml")) {
-            manifest_paths.push(path);
-        }
-    }
-    Ok(manifest_paths)
-}
-
-pub enum Error {
-    Io(std::io::Error),
-    TomlEdit(toml_edit::TomlError),
-    CratesIoApi(crates_io_api::Error),
-    InvalidPackageTable,
-    InvalidPackageName,
-    InvalidPackageVersion,
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Io(e) => write!(f, "IO error: {}", e),
-            Error::TomlEdit(e) => write!(f, "TOML error: {}", e),
-            Error::CratesIoApi(e) => write!(f, "Crates.io API error: {}", e),
-            Error::InvalidPackageTable => write!(f, "Invalid package table"),
-            Error::InvalidPackageName => write!(f, "Invalid package name"),
-            Error::InvalidPackageVersion => write!(f, "Invalid package version"),
-        }
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
-        Error::Io(e)
-    }
-}
-
-impl From<toml_edit::TomlError> for Error {
-    fn from(e: toml_edit::TomlError) -> Self {
-        Error::TomlEdit(e)
-    }
-}
-
-impl From<crates_io_api::Error> for Error {
-    fn from(e: crates_io_api::Error) -> Self {
-        Error::CratesIoApi(e)
-    }
+    Ok(Outcome::AlreadyUpdated(package_version_before))
 }
 
 pub enum Outcome {
-    AlreadyUpdated(String),
-    Updated(String, String),
+    AlreadyUpdated(Version),
+    Updated(Version, Version),
     PublishFalse,
 }
