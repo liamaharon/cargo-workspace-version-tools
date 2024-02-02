@@ -4,6 +4,8 @@ use semver::Version;
 use std::{collections::HashSet, fmt::Display, fs, path::PathBuf};
 use toml_edit::{Document, Table};
 
+use crate::common::version_extension::{BumpType, VersionExtension};
+
 /// A wrapper around the toml_edit Document with convenience methods
 #[derive(Debug)]
 pub struct Package {
@@ -12,16 +14,14 @@ pub struct Package {
     /// Path
     path: PathBuf,
     /// Direct, non-development dependencies that are also workspace members
-    pub direct_workspace_dependencies: HashSet<String>,
-    /// Direct and indirect non-development dependencies that are also workspace members
-    all_workspace_dependencies: Option<HashSet<String>>,
-    /// Direct and indirect non-development dependents that are also workspace members
-    all_workspace_dependents: Option<HashSet<String>>,
+    direct_workspace_dependencies: HashSet<String>,
+    /// Direct non-development dependents that are also workspace members
+    direct_workspace_dependents: Option<HashSet<String>>,
 }
 
 impl Display for Package {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} ({})", self.name(), self.version())
+        write!(f, "{}", self.name())
     }
 }
 
@@ -59,7 +59,30 @@ impl Package {
             .expect(format!("Failed to create Version from {:?} version", self.path).as_str())
     }
 
+    pub fn direct_workspace_dependents(&self) -> &HashSet<String> {
+        self.direct_workspace_dependents
+            .as_ref()
+            .expect("Direct dependents not initialized")
+    }
+
+    pub fn direct_workspace_dependencies(&self) -> &HashSet<String> {
+        &self.direct_workspace_dependencies
+    }
+
+    pub fn set_direct_dependents(self: &mut Self, direct_dependents: HashSet<String>) {
+        self.direct_workspace_dependents = Some(direct_dependents);
+    }
+
     pub fn set_version(self: &mut Self, version: &Version) {
+        let bump_type = version.bump_type(&self.version());
+        log::info!(
+            "Bumping {} ({} -> {}) [{}]",
+            self.name(),
+            self.version(),
+            &version,
+            bump_type
+        );
+
         self.package_mut()["version"] = toml_edit::value(version.to_string());
         fs::write(self.path.clone(), self.doc.to_string())
             .expect(format!("Failed to write to {:?}", self.path).as_str())
@@ -86,32 +109,6 @@ impl Package {
         return true;
     }
 
-    pub fn set_all_workspace_dependencies(
-        self: &mut Self,
-        all_workspace_dependencies: HashSet<String>,
-    ) {
-        self.all_workspace_dependencies = Some(all_workspace_dependencies);
-    }
-
-    pub fn all_workspace_dependencies(self: &Self) -> &HashSet<String> {
-        self.all_workspace_dependencies
-            .as_ref()
-            .expect("all_workspace_dependencies not set")
-    }
-
-    pub fn set_all_workspace_dependents(
-        self: &mut Self,
-        all_workspace_dependents: HashSet<String>,
-    ) {
-        self.all_workspace_dependents = Some(all_workspace_dependents);
-    }
-
-    pub fn all_workspace_dependents(self: &Self) -> &HashSet<String> {
-        self.all_workspace_dependents
-            .as_ref()
-            .expect("all_workspace_dependents not set")
-    }
-
     pub fn new(
         cargo_metadata_package: &cargo_metadata::Package,
         workspace_members: &HashSet<String>,
@@ -129,6 +126,7 @@ impl Package {
 
         Ok(Self {
             doc,
+            direct_workspace_dependents: None,
             direct_workspace_dependencies: cargo_metadata_package
                 .dependencies
                 .iter()
@@ -139,8 +137,6 @@ impl Package {
                 .map(|d| d.name.clone())
                 .collect(),
             path: path.into(),
-            all_workspace_dependents: None,
-            all_workspace_dependencies: None,
         })
     }
 }

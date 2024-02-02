@@ -1,15 +1,17 @@
 use super::package::Package;
-use crate::common::graph::{find_dependencies, find_dependents};
+use crate::common::graph::find_direct_dependents;
 use cargo_metadata::MetadataCommand;
 use std::{
+    cell::RefCell,
     collections::{HashMap, HashSet},
     path::PathBuf,
+    rc::Rc,
 };
 
 /// An in-memory representation of the workspace members
 pub struct Workspace {
     /// Members of the workspace
-    pub packages: HashMap<String, Package>,
+    pub packages: HashMap<String, Rc<RefCell<Package>>>,
 }
 
 impl Workspace {
@@ -26,7 +28,7 @@ impl Workspace {
             .iter()
             .map(|p| p.name.clone())
             .collect::<HashSet<_>>();
-        let mut workspace_package_map = cargo_metadata_members
+        let workspace_package_map = cargo_metadata_members
             .iter()
             .map(|p| {
                 Package::new(&p, &workspace_member_names)
@@ -36,7 +38,7 @@ impl Workspace {
                 match package_result {
                     Ok(package) => {
                         log::debug!("Loaded package {}", package);
-                        acc.insert(package.name(), package);
+                        acc.insert(package.name(), Rc::new(RefCell::new(package)));
                     }
                     Err(e) => log::error!("{}", e),
                 };
@@ -51,7 +53,8 @@ impl Workspace {
                 (
                     name.clone(),
                     package
-                        .direct_workspace_dependencies
+                        .borrow()
+                        .direct_workspace_dependencies()
                         .iter()
                         .map(|dep| dep.clone())
                         .collect::<HashSet<_>>(),
@@ -59,10 +62,13 @@ impl Workspace {
             })
             .collect::<HashMap<_, _>>();
 
-        for (name, package) in workspace_package_map.iter_mut() {
-            package.set_all_workspace_dependencies(find_dependencies(&name, &workspace_deps_map));
-            package.set_all_workspace_dependents(find_dependents(&name, &workspace_deps_map));
+        for (name, package) in workspace_package_map.iter() {
+            let direct_dependents = find_direct_dependents(name, &workspace_deps_map);
+            package
+                .borrow_mut()
+                .set_direct_dependents(direct_dependents);
         }
+
         log::debug!(
             "Computed dependencies and dependents in {}ms",
             start.elapsed().as_millis()

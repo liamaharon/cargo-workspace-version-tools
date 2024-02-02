@@ -14,18 +14,23 @@ pub async fn exec(workspace: &mut Workspace) {
 
     // Check every manifest
     let total_files = workspace.packages.len();
-    for (i, mut package) in workspace.packages.values_mut().enumerate() {
+    for (i, package) in workspace.packages.values_mut().enumerate() {
         let progress = format!("[{}/{}]", i, total_files);
-        match sync_manifest(&client, &mut package).await {
+        match sync_manifest(&client, &mut package.borrow_mut()).await {
             Ok(outcome) => match outcome {
                 Outcome::AlreadyUpdated(v) => {
-                    log::info!("{} ✅ {} already synced: {}", progress, package.name(), v);
+                    log::info!(
+                        "{} ✅ {} already synced: {}",
+                        progress,
+                        package.borrow().name(),
+                        v
+                    );
                 }
                 Outcome::Updated(prev_version, new_version) => {
                     log::info!(
                         "{} 📝 Updated {} Cargo.toml to match crates.io ({} -> {})",
                         progress,
-                        package.name(),
+                        package.borrow().name(),
                         prev_version,
                         new_version
                     );
@@ -34,11 +39,16 @@ pub async fn exec(workspace: &mut Workspace) {
                     log::info!(
                         "{} 💤 {} publish = false, skipping",
                         progress,
-                        package.name()
+                        package.borrow().name()
                     )
                 }
             },
-            Err(e) => log::error!("{} ❌ Failed to check {} {}", progress, package.name(), e),
+            Err(e) => log::error!(
+                "{} ❌ Failed to check {} {}",
+                progress,
+                package.borrow().name(),
+                e
+            ),
         }
     }
 }
