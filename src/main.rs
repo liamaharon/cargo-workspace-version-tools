@@ -34,6 +34,10 @@ async fn run() -> Result<(), String> {
                 .about("Sync local Cargo.toml files to match crates.io version")
         )
         .subcommand(
+            clap::command!("make-at-least-stable")
+                .about("Make local Cargo.toml versions support compatible bumps by removing prerelease suffixes and bumping to at least 0.1.0.")
+        )
+        .subcommand(
             clap::command!("bump")
                 .subcommand_required(true)
                 .about("Bump a package in the workspace")
@@ -77,6 +81,10 @@ async fn run() -> Result<(), String> {
     match matches.subcommand() {
         Some(("sync", _)) => {
             commands::sync::exec(&mut workspace).await;
+            Ok(())
+        }
+        Some(("make-at-least-stable", _)) => {
+            commands::make_at_least_stable::exec(&mut workspace).await;
             Ok(())
         }
         Some(("bump", matches)) => {

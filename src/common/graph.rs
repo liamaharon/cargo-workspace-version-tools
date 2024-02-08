@@ -1,4 +1,4 @@
-use super::colors::{BLUE, GREY, RED};
+use super::colors::{BLUE, RED};
 use super::{package::Package, workspace::Workspace};
 use crate::common::colors::RESET;
 use crate::common::version_extension::{BumpType, VersionExtension};
