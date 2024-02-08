@@ -60,7 +60,7 @@ impl VersionExtension for Version {
         let pre_parts = pre_string.split(".").collect::<Vec<_>>();
 
         if pre_parts.len() != 2 || pre_parts[1].parse::<u64>().is_err() {
-            log::warn!("Prerelease version is not in the format of somelabel.n. Appending .1 to the prerelease part and moving on.");
+            log::warn!("Prerelease version {} is not in the format of somelabel.n. Appending .1 to the prerelease part and moving on.", &self);
             next_version.pre = format!("{}.1", self.pre).parse().unwrap();
             return next_version;
         }
@@ -107,7 +107,7 @@ impl VersionExtension for Version {
         let mut bumped = self.clone();
 
         // Deal with non-prerelease 0.0.X version
-        if bumped.pre.is_empty() && (bumped.minor > 0 || bumped.major > 0) {
+        if bumped.pre.is_empty() && bumped.minor == 0 && bumped.major == 0 {
             bumped.patch += 1;
             return (bumped, BumpType::Breaking);
         };
@@ -119,7 +119,7 @@ impl VersionExtension for Version {
 
             // Check parts
             if pre_parts.len() != 2 || pre_parts[1].parse::<u64>().is_err() {
-                log::warn!("Prerelease version is not in the format of somelabel.n. Appending .1 to the prerelease part and moving on.");
+                log::warn!("Prerelease version  is not in the format of somelabel.n. Appending .1 to the prerelease part and moving on.");
                 bumped.pre = format!("{}.1", bumped.pre).parse().unwrap();
             }
 

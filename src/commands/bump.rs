@@ -1,26 +1,102 @@
 pub mod stable {
-    use crate::common::{graph::BumpTree, version_extension::VersionExtension, workspace};
+    use crate::common::{
+        graph::BumpTree,
+        workspace::{self, Workspace},
+    };
     use semver::Version;
 
     pub fn exec(
-        workspace: &mut workspace::Workspace,
+        stable_workspace: &mut workspace::Workspace,
         package_name: &str,
         next_version: &Version,
-        prerelease_branch: Option<&str>,
+        prerelease_workspace_option: Option<Workspace>,
         dry_run: bool,
     ) -> Result<(), String> {
-        validate(workspace, package_name, next_version)?;
+        validate(stable_workspace, package_name, next_version)?;
 
         // Get the package
-        let package = workspace
-            .packages
-            .get(package_name)
-            .expect("Package must exist");
+        let package = stable_workspace.packages.get(package_name).ok_or(format!(
+            "Package {} does not exist in the workspace",
+            package_name
+        ))?;
 
-        let mut bump_tree = BumpTree::new(workspace);
+        log::info!(
+            "Building bump tree for {} to {}...",
+            package_name,
+            next_version
+        );
+        let mut bump_tree = BumpTree::new(stable_workspace, &prerelease_workspace_option);
         let root = bump_tree.build(package.clone(), next_version.clone());
 
-        log::info!("\nBump Tree\n{}", root);
+        log::info!("Bump Tree");
+        println!("{}", root.expect("root must be Some"));
+        log::info!("{}", bump_tree.summary());
+
+        if dry_run {
+            log::info!("Dry-run: abort");
+            return Ok(());
+        }
+
+        // Bump packages on the stable branch and commit the changes
+        log::info!("Bumping packages on stable branch and committing changes...");
+        stable_workspace.checkout_local_branch()?;
+        for (package_name, b) in bump_tree.bumped.iter() {
+            let package = stable_workspace
+                .packages
+                .get(package_name)
+                .expect("Package must exist");
+
+            package.borrow_mut().set_version(&b.next_version);
+        }
+
+        stable_workspace.update_lockfile()?;
+
+        stable_workspace
+            .stage_and_commit_all(format!("Bump {} to {}", package_name, next_version).as_str())?;
+
+        // Bump packages on prerelease branch, if it exists
+        if let Some(prerelease_workspace) = &prerelease_workspace_option {
+            log::info!("Bumping packages on prerelease branch and committing changes...");
+            prerelease_workspace.checkout_local_branch()?;
+
+            let prerelease_branch_name =
+                format!("propagate-{}-stable-bump-to-{}", package_name, next_version);
+            prerelease_workspace
+                .create_and_checkout_branch(prerelease_branch_name.as_str())
+                .map_err(|e| e.to_string())?;
+
+            for (package_name, b) in bump_tree.bumped.iter() {
+                match prerelease_workspace.packages.get(package_name) {
+                    Some(prerelease_package) => {
+                        prerelease_package.borrow_mut().set_version(
+                            &b.next_prerelease_version
+                                .clone()
+                                .expect("New version in bump tree for a package that doesn't exist in workspace!"),
+                        );
+                    }
+                    None => {
+                        log::info!(
+                            "No package found in the prerelease workspace for package {}, skipping",
+                            package_name
+                        );
+                    }
+                }
+            }
+
+            prerelease_workspace.update_lockfile()?;
+            prerelease_workspace.stage_and_commit_all(
+                format!(
+                    "Propagate stable bump of {} to {} to prerelease",
+                    package_name, next_version
+                )
+                .as_str(),
+            )?;
+        }
+
+        // Check back out to the original branch before exiting.
+        stable_workspace.checkout_local_branch()?;
+
+        log::info!("Workspace updated");
 
         Ok(())
     }
@@ -30,14 +106,6 @@ pub mod stable {
         package: &str,
         version: &Version,
     ) -> Result<(), String> {
-        // Package must exist in the workspace
-        if !workspace.packages.contains_key(package) {
-            return Err(format!(
-                "Package {} does not exist in the workspace",
-                package
-            ));
-        }
-
         // Version must not be pre-release
         if !version.pre.is_empty() {
             return Err(format!(

@@ -1,10 +1,9 @@
+use crate::common::version_extension::VersionExtension;
 use cargo_metadata::DependencyKind;
 use crates_io_api::AsyncClient;
 use semver::Version;
 use std::{collections::HashSet, fmt::Display, fs, path::PathBuf};
 use toml_edit::{Document, Table};
-
-use crate::common::version_extension::{BumpType, VersionExtension};
 
 /// A wrapper around the toml_edit Document with convenience methods
 #[derive(Debug)]
@@ -15,7 +14,7 @@ pub struct Package {
     path: PathBuf,
     /// Direct, non-development dependencies that are also workspace members
     direct_workspace_dependencies: HashSet<String>,
-    /// Direct non-development dependents that are also workspace members
+    /// Direct, non-development dependents that are also workspace members
     direct_workspace_dependents: Option<HashSet<String>>,
 }
 
@@ -75,7 +74,7 @@ impl Package {
 
     pub fn set_version(self: &mut Self, version: &Version) {
         let bump_type = version.bump_type(&self.version());
-        log::info!(
+        log::debug!(
             "Bumping {} ({} -> {}) [{}]",
             self.name(),
             self.version(),

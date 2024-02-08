@@ -1,10 +1,18 @@
-use super::package::Package;
-use crate::common::graph::find_direct_dependents;
+use super::{
+    git::{checkout_local_branch, create_and_checkout_branch, stage_and_commit_all_changes},
+    package::Package,
+};
+use crate::common::{
+    git::{do_fast_forward, do_fetch, get_current_branch_name, is_working_tree_clean},
+    graph::find_direct_dependents,
+};
 use cargo_metadata::MetadataCommand;
+use git2::Repository;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     path::PathBuf,
+    process::Command,
     rc::Rc,
 };
 
@@ -12,15 +20,50 @@ use std::{
 pub struct Workspace {
     /// Members of the workspace
     pub packages: HashMap<String, Rc<RefCell<Package>>>,
+    /// Workspace path
+    pub path: PathBuf,
+    /// Git branch
+    branch_name: String,
+    /// Git remote
+    remote_name: String,
 }
 
 impl Workspace {
-    pub fn new(workspace_path: &PathBuf) -> Result<Self, String> {
+    pub fn new(
+        workspace_path: &PathBuf,
+        branch_name: Option<&str>,
+        remote_name: &str,
+    ) -> Result<Self, String> {
         let cargo_toml_path = workspace_path.join("Cargo.toml");
         let metadata = MetadataCommand::new()
             .manifest_path(&cargo_toml_path)
             .exec()
             .map_err(|e| format!("Failed to load workspace at {:?}: {}", &cargo_toml_path, e))?;
+
+        let repo = Repository::open(&workspace_path).expect("Failed to open repository");
+        let branch_name = match branch_name {
+            Some(branch_name) => branch_name.to_owned(),
+            None => get_current_branch_name(&repo)
+                .expect("Failed to get current branch name")
+                .to_owned(),
+        };
+
+        if !is_working_tree_clean(&repo) {
+            return Err("Workspace is not clean. Please commit or stash your changes.".to_owned());
+        }
+
+        log::info!(
+            "Pulling latest changes from remote '{} {}'",
+            &remote_name,
+            &branch_name
+        );
+        let mut remote = repo
+            .find_remote(&remote_name)
+            .map_err(|e| format!("{}", e))?;
+        log::info!("Fetching latest changes from {}", &remote_name);
+        let fetch_commit =
+            do_fetch(&repo, &[&branch_name], &mut remote).map_err(|e| format!("{}", e))?;
+        do_fast_forward(&repo, &branch_name, fetch_commit).map_err(|e| format!("{}", e))?;
 
         // Create the Packages
         let cargo_metadata_members = metadata.workspace_packages();
@@ -46,7 +89,6 @@ impl Workspace {
             });
 
         // Compute and set the dependencies and dependents
-        let start = std::time::Instant::now();
         let workspace_deps_map = workspace_package_map
             .iter()
             .map(|(name, package)| {
@@ -69,13 +111,54 @@ impl Workspace {
                 .set_direct_dependents(direct_dependents);
         }
 
-        log::debug!(
-            "Computed dependencies and dependents in {}ms",
-            start.elapsed().as_millis()
-        );
-
-        Ok(Workspace {
+        let w = Workspace {
             packages: workspace_package_map,
-        })
+            path: workspace_path.clone(),
+            branch_name,
+            remote_name: remote_name.to_owned(),
+        };
+
+        Ok(w)
+    }
+
+    pub fn stage_and_commit_all(&self, message: &str) -> Result<(), String> {
+        log::info!("Staging and committing changes...");
+        let repo = self.open_repository();
+        stage_and_commit_all_changes(&repo, &self.branch_name, message)
+            .map_err(|e| format!("{}", e))
+    }
+
+    pub fn open_repository(&self) -> Repository {
+        Repository::open(&self.path).expect("Failed to open repository")
+    }
+
+    /// Hack to quickly update the Cargo.lock based only on workspace changes
+    pub fn update_lockfile(&self) -> Result<(), String> {
+        log::info!("Updating branch {} Cargo.lock...", &self.branch_name);
+        let output = Command::new("cargo")
+            .arg("metadata")
+            .arg("--manifest-path")
+            .arg(&self.path.join("Cargo.toml"))
+            .current_dir(&self.path)
+            .output()
+            .map_err(|e| format!("Failed to execute command: {}", e))?;
+
+        if output.status.success() {
+            log::info!("Done ✅");
+        } else {
+            log::warn!("Issue updating Cargo.lock");
+        }
+
+        Ok(())
+    }
+
+    pub fn create_and_checkout_branch(&self, branch_name: &str) -> Result<(), String> {
+        let repo = self.open_repository();
+        create_and_checkout_branch(&repo, &self.remote_name, branch_name).map_err(|e| e.to_string())
+    }
+
+    pub fn checkout_local_branch(&self) -> Result<(), String> {
+        let repo = self.open_repository();
+        checkout_local_branch(&repo, &self.branch_name).map_err(|e| e.to_string())
     }
 }
