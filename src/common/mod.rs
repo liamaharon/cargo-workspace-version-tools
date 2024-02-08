@@ -1,3 +1,4 @@
+pub mod colors;
 pub mod git;
 pub mod graph;
 pub mod package;

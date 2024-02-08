@@ -1,5 +1,6 @@
 pub mod stable {
     use crate::common::{
+        colors::{BLUE, GREEN},
         graph::BumpTree,
         workspace::{self, Workspace},
     };
@@ -20,25 +21,23 @@ pub mod stable {
             package_name
         ))?;
 
-        log::info!(
-            "Building bump tree for {} to {}...",
-            package_name,
-            next_version
-        );
+        log::info!("⏳Building bump tree...");
         let mut bump_tree = BumpTree::new(stable_workspace, &prerelease_workspace_option);
         let root = bump_tree.build(package.clone(), next_version.clone());
 
-        log::info!("Bump Tree");
+        log::info!("✅ Bump Tree");
         println!("{}", root.expect("root must be Some"));
         log::info!("{}", bump_tree.summary());
 
         if dry_run {
-            log::info!("Dry-run: abort");
+            log::info!("Dry-run: aborting");
             return Ok(());
         }
 
         // Bump packages on the stable branch and commit the changes
-        log::info!("Bumping packages on stable branch and committing changes...");
+        log::info!("{}---------------------------------------", BLUE);
+        log::info!("{}Applying version bumps to stable branch", BLUE);
+        log::info!("{}---------------------------------------", BLUE);
         stable_workspace.checkout_local_branch()?;
         for (package_name, b) in bump_tree.bumped.iter() {
             let package = stable_workspace
@@ -56,7 +55,9 @@ pub mod stable {
 
         // Bump packages on prerelease branch, if it exists
         if let Some(prerelease_workspace) = &prerelease_workspace_option {
-            log::info!("Bumping packages on prerelease branch and committing changes...");
+            log::info!("{}-------------------------------------------", BLUE);
+            log::info!("{}Applying version bumps to prerelease branch", BLUE);
+            log::info!("{}-------------------------------------------", BLUE);
             prerelease_workspace.checkout_local_branch()?;
 
             let prerelease_branch_name =
@@ -91,12 +92,24 @@ pub mod stable {
                 )
                 .as_str(),
             )?;
+
+            log::info!("❗ Don't forget to run `git push {} {}` and open a PR to update the prerelease branch!", stable_workspace.remote_name, prerelease_branch_name);
         }
 
         // Check back out to the original branch before exiting.
+        log::info!(
+            "{}-------------------------------------------------------------",
+            GREEN
+        );
+        log::info!(
+            "{}Done! Checking back out to the original branch before exiting",
+            GREEN
+        );
+        log::info!(
+            "{}-------------------------------------------------------------",
+            GREEN
+        );
         stable_workspace.checkout_local_branch()?;
-
-        log::info!("Workspace updated");
 
         Ok(())
     }

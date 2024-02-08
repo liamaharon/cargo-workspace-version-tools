@@ -23,9 +23,9 @@ pub struct Workspace {
     /// Workspace path
     pub path: PathBuf,
     /// Git branch
-    branch_name: String,
+    pub branch_name: String,
     /// Git remote
-    remote_name: String,
+    pub remote_name: String,
 }
 
 impl Workspace {
@@ -34,19 +34,22 @@ impl Workspace {
         branch_name: Option<&str>,
         remote_name: &str,
     ) -> Result<Self, String> {
-        let cargo_toml_path = workspace_path.join("Cargo.toml");
-        let metadata = MetadataCommand::new()
-            .manifest_path(&cargo_toml_path)
-            .exec()
-            .map_err(|e| format!("Failed to load workspace at {:?}: {}", &cargo_toml_path, e))?;
+        let repo = Repository::open(&workspace_path)
+            .map_err(|e| format!("Failed to open repository at {:?}: {}", &workspace_path, e))?;
 
-        let repo = Repository::open(&workspace_path).expect("Failed to open repository");
+        let cargo_toml_path = workspace_path.join("Cargo.toml");
         let branch_name = match branch_name {
             Some(branch_name) => branch_name.to_owned(),
             None => get_current_branch_name(&repo)
                 .expect("Failed to get current branch name")
                 .to_owned(),
         };
+
+        log::info!(
+            "⏳Building workspace for path {:?} branch {}...",
+            &cargo_toml_path,
+            &branch_name
+        );
 
         if !is_working_tree_clean(&repo) {
             return Err("Workspace is not clean. Please commit or stash your changes.".to_owned());
@@ -66,6 +69,11 @@ impl Workspace {
         do_fast_forward(&repo, &branch_name, fetch_commit).map_err(|e| format!("{}", e))?;
 
         // Create the Packages
+        let metadata = MetadataCommand::new()
+            .manifest_path(&cargo_toml_path)
+            .exec()
+            .map_err(|e| format!("Failed to load workspace at {:?}: {}", &cargo_toml_path, e))?;
+
         let cargo_metadata_members = metadata.workspace_packages();
         let workspace_member_names = cargo_metadata_members
             .iter()
@@ -118,14 +126,16 @@ impl Workspace {
             remote_name: remote_name.to_owned(),
         };
 
+        log::info!("Workspace built ✅");
+
         Ok(w)
     }
 
     pub fn stage_and_commit_all(&self, message: &str) -> Result<(), String> {
-        log::info!("Staging and committing changes...");
         let repo = self.open_repository();
         stage_and_commit_all_changes(&repo, &self.branch_name, message)
-            .map_err(|e| format!("{}", e))
+            .map_err(|e| format!("{}", e))?;
+        Ok(())
     }
 
     pub fn open_repository(&self) -> Repository {
@@ -134,7 +144,7 @@ impl Workspace {
 
     /// Hack to quickly update the Cargo.lock based only on workspace changes
     pub fn update_lockfile(&self) -> Result<(), String> {
-        log::info!("Updating branch {} Cargo.lock...", &self.branch_name);
+        log::info!("⏳Updating branch {} Cargo.lock...", &self.branch_name);
         let output = Command::new("cargo")
             .arg("metadata")
             .arg("--manifest-path")
@@ -159,6 +169,8 @@ impl Workspace {
 
     pub fn checkout_local_branch(&self) -> Result<(), String> {
         let repo = self.open_repository();
-        checkout_local_branch(&repo, &self.branch_name).map_err(|e| e.to_string())
+        checkout_local_branch(&repo, &self.branch_name).map_err(|e| e.to_string())?;
+        log::info!("Checked out branch {}", &self.branch_name);
+        Ok(())
     }
 }

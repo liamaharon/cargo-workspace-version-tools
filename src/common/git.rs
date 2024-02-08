@@ -100,7 +100,7 @@ pub fn do_fetch<'a>(
             stats.received_bytes(),
             stats.local_objects()
         );
-    } else {
+    } else if stats.received_bytes() > 0 {
         println!(
             "\rReceived {}/{} objects in {} bytes",
             stats.indexed_objects(),
@@ -211,17 +211,20 @@ pub fn stage_and_commit_all_changes(
     branch_name: &str,
     message: &str,
 ) -> Result<(), git2::Error> {
-    // Stage
+    log::info!(
+        "⏳Staging and committing changes to branch {} with message: {}",
+        branch_name,
+        message
+    );
     let mut index = repo.index()?;
     index.add_all(["."].iter(), IndexAddOption::DEFAULT, None)?;
     index.write()?;
 
-    // Commit
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
     let signature = repo.signature()?;
     let parent_commit = find_last_commit_on_branch(&repo, branch_name)?;
-    repo.commit(
+    let new_commit_iod = repo.commit(
         Some("HEAD"),
         &signature,
         &signature,
@@ -230,14 +233,14 @@ pub fn stage_and_commit_all_changes(
         &[&parent_commit],
     )?;
 
+    log::info!(
+        "✅ Staged and committed changes to branch {}: {}",
+        branch_name,
+        new_commit_iod
+    );
+
     Ok(())
 }
-
-// fn find_last_commit(repo: &Repository) -> Result<Commit, git2::Error> {
-//     let obj = repo.head()?.resolve()?.peel(ObjectType::Commit)?;
-//     obj.into_commit()
-//         .map_err(|_| git2::Error::from_str("Couldn't find commit"))
-// }
 
 fn find_last_commit_on_branch<'a>(
     repo: &'a Repository,
@@ -289,6 +292,7 @@ pub fn create_and_checkout_branch(
     remote_name: &str,
     branch_name: &str,
 ) -> Result<(), git2::Error> {
+    log::info!("⏳Creating and checking out new branch {}", branch_name);
     // Get the current HEAD commit as the starting point for the new branch
     let head = repo.head()?;
     let commit = head.peel_to_commit()?;
@@ -336,6 +340,8 @@ pub fn create_and_checkout_branch(
 
     // Checkout the new branch to update the working directory
     repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))?;
+
+    log::info!("✅ Created and checked out new branch {}", branch_name);
 
     Ok(())
 }

@@ -1,4 +1,6 @@
+use super::colors::{BLUE, GREY, RED};
 use super::{package::Package, workspace::Workspace};
+use crate::common::colors::RESET;
 use crate::common::version_extension::{BumpType, VersionExtension};
 use core::fmt;
 use semver::Version;
@@ -18,17 +20,12 @@ pub struct BumpNode {
     dependents: Vec<BumpNode>,
 }
 
-const RED: &str = "\x1b[31m";
-const BLUE: &str = "\x1b[34m";
-const RESET: &str = "\x1b[0m"; // Resets the color
-
 impl BumpNode {
     fn fmt_with_indent(&self, f: &mut Formatter, prefix: String, last: bool) -> fmt::Result {
         let is_root = prefix.is_empty();
-        let color = if self.bump_type == BumpType::Compatible {
-            BLUE
-        } else {
-            RED
+        let color = match self.bump_type {
+            BumpType::Compatible => BLUE,
+            BumpType::Breaking => RED,
         };
 
         let connector = if is_root {
@@ -54,9 +51,8 @@ impl BumpNode {
             self.package.borrow().version(),
             self.next_version,
             prerelease_bump_details,
-            RESET,
+            RESET
         )?;
-        // }
 
         // Continue with the logic for dependents as before.
         let new_prefix = if last {
