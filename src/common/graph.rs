@@ -54,7 +54,6 @@ impl BumpNode {
             RESET
         )?;
 
-        // Continue with the logic for dependents as before.
         let new_prefix = if last {
             prefix + "    "
         } else {
@@ -73,6 +72,39 @@ impl BumpNode {
 impl Display for BumpNode {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         self.fmt_with_indent(f, "".to_string(), true)
+    }
+}
+
+impl Display for BumpTree<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(
+            f,
+            "🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲\n"
+        )?;
+        write!(
+            f,
+            "🌲 Bump Tree (duplicates emitted, breaking bumps prioritised) 🌲\n"
+        )?;
+        write!(
+            f,
+            "🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲\n"
+        )?;
+        for node in self.root_nodes.iter() {
+            node.fmt_with_indent(f, "".to_string(), true)?;
+            write!(f, "\n\n")?;
+        }
+        let summary = self.summary();
+        write!(
+            f,
+            "[Summary] {}Compatible: {} {}Breaking: {}{} Total: {}",
+            BLUE,
+            summary.compatible_bumps,
+            RED,
+            summary.breaking_bumps,
+            RESET,
+            summary.compatible_bumps + summary.breaking_bumps
+        )?;
+        Ok(())
     }
 }
 
@@ -102,26 +134,45 @@ pub struct BumpDetails {
     pub bump_type: BumpType,
 }
 
-// Define `BumpTree` with a lifetime parameter `'a`
 pub struct BumpTree<'a> {
     stable_workspace: &'a Workspace,
     prerelease_workspace: &'a Option<Workspace>,
     pub bumped: HashMap<String, BumpDetails>,
+    root_nodes: Vec<BumpNode>,
 }
 
 impl<'a> BumpTree<'a> {
     pub fn new(
         stable_workspace: &'a Workspace,
         prerelease_workspace: &'a Option<Workspace>,
+        root_packages: Vec<(Rc<RefCell<Package>>, Version)>,
     ) -> Self {
-        Self {
+        let mut tree = Self {
             stable_workspace,
             prerelease_workspace,
             bumped: HashMap::new(),
-        }
+            root_nodes: Vec::new(),
+        };
+        let root_nodes = tree.build(root_packages);
+        tree.set_root_nodes(root_nodes);
+
+        tree
     }
 
-    pub fn build(
+    fn build(&mut self, root_packages: Vec<(Rc<RefCell<Package>>, Version)>) -> Vec<BumpNode> {
+        root_packages
+            .iter()
+            .filter_map(|(package, next_version)| {
+                self.build_rec(package.clone(), next_version.clone())
+            })
+            .collect()
+    }
+
+    fn set_root_nodes(&mut self, root_nodes: Vec<BumpNode>) {
+        self.root_nodes = root_nodes;
+    }
+
+    pub fn build_rec(
         self: &mut Self,
         package: Rc<RefCell<Package>>,
         next_version: Version,
@@ -177,7 +228,8 @@ impl<'a> BumpTree<'a> {
                     BumpType::Compatible => dependent_package.borrow().version().bump_smallest().0,
                 };
 
-                let dependent_node = self.build(dependent_package.clone(), dependent_next_version);
+                let dependent_node =
+                    self.build_rec(dependent_package.clone(), dependent_next_version);
 
                 if let Some(dependent_node) = dependent_node {
                     dependent_nodes.push(dependent_node);

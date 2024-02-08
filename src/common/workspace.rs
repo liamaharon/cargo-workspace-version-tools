@@ -63,7 +63,6 @@ impl Workspace {
         let mut remote = repo
             .find_remote(&remote_name)
             .map_err(|e| format!("{}", e))?;
-        log::info!("Fetching latest changes from {}", &remote_name);
         let fetch_commit =
             do_fetch(&repo, &[&branch_name], &mut remote).map_err(|e| format!("{}", e))?;
         do_fast_forward(&repo, &branch_name, fetch_commit).map_err(|e| format!("{}", e))?;

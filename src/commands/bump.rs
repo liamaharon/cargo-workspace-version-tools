@@ -1,33 +1,68 @@
+use std::{fmt::Display, str::FromStr};
+
+use semver::Version;
+
+#[derive(Clone)]
+pub struct PackageChange {
+    pub name: String,
+    pub version: Version,
+}
+
+impl FromStr for PackageChange {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.splitn(2, ' ').collect();
+        let name = parts[0].to_string();
+        let version = Version::parse(parts[1])
+            .map_err(|e| format!("Failed to parse version {}: {}", parts[1], e))?;
+        Ok(PackageChange { name, version })
+    }
+}
+
+impl Display for PackageChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-{}", self.name, self.version)
+    }
+}
+
 pub mod stable {
+    use super::*;
     use crate::common::{
         colors::{BLUE, GREEN},
         graph::BumpTree,
         workspace::{self, Workspace},
     };
-    use semver::Version;
 
     pub fn exec(
         stable_workspace: &mut workspace::Workspace,
-        package_name: &str,
-        next_version: &Version,
+        package_changes: Vec<&PackageChange>,
         prerelease_workspace_option: Option<Workspace>,
         dry_run: bool,
     ) -> Result<(), String> {
-        validate(stable_workspace, package_name, next_version)?;
-
-        // Get the package
-        let package = stable_workspace.packages.get(package_name).ok_or(format!(
-            "Package {} does not exist in the workspace",
-            package_name
-        ))?;
+        for entry in package_changes.iter() {
+            validate(stable_workspace, &entry.name, &entry.version)?;
+        }
 
         log::info!("⏳Building bump tree...");
-        let mut bump_tree = BumpTree::new(stable_workspace, &prerelease_workspace_option);
-        let root = bump_tree.build(package.clone(), next_version.clone());
+        let root_packages = package_changes
+            .iter()
+            .map(|entry| {
+                let package = stable_workspace
+                    .packages
+                    .get(&entry.name)
+                    .expect("Package {} does not exist in the workspace")
+                    .clone();
+                let next_version = entry.version.clone();
+                (package, next_version)
+            })
+            .collect::<Vec<_>>();
+        let bump_tree = BumpTree::new(
+            stable_workspace,
+            &prerelease_workspace_option,
+            root_packages,
+        );
 
-        log::info!("✅ Bump Tree");
-        println!("{}", root.expect("root must be Some"));
-        log::info!("{}", bump_tree.summary());
+        println!("{}", bump_tree);
 
         if dry_run {
             log::info!("Dry-run: aborting");
@@ -50,8 +85,14 @@ pub mod stable {
 
         stable_workspace.update_lockfile()?;
 
-        stable_workspace
-            .stage_and_commit_all(format!("Bump {} to {}", package_name, next_version).as_str())?;
+        let changes_string_vec = &package_changes
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>();
+
+        stable_workspace.stage_and_commit_all(
+            format!("Apply bumps {}", changes_string_vec.join(", ")).as_str(),
+        )?;
 
         // Bump packages on prerelease branch, if it exists
         if let Some(prerelease_workspace) = &prerelease_workspace_option {
@@ -60,8 +101,10 @@ pub mod stable {
             log::info!("{}-------------------------------------------", BLUE);
             prerelease_workspace.checkout_local_branch()?;
 
-            let prerelease_branch_name =
-                format!("propagate-{}-stable-bump-to-{}", package_name, next_version);
+            let prerelease_branch_name = format!(
+                "propagate-{}-bump-to-prerelease",
+                changes_string_vec.join("_")
+            );
             prerelease_workspace
                 .create_and_checkout_branch(prerelease_branch_name.as_str())
                 .map_err(|e| e.to_string())?;
@@ -87,8 +130,8 @@ pub mod stable {
             prerelease_workspace.update_lockfile()?;
             prerelease_workspace.stage_and_commit_all(
                 format!(
-                    "Propagate stable bump of {} to {} to prerelease",
-                    package_name, next_version
+                    "Propagate stable {} bump to prerelease",
+                    changes_string_vec.join(", ")
                 )
                 .as_str(),
             )?;

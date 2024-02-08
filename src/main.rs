@@ -1,4 +1,5 @@
-use clap::value_parser;
+use clap::{value_parser, ArgAction, Args};
+use commands::bump::PackageChange;
 use common::workspace::Workspace;
 use env_logger::Env;
 use semver::Version;
@@ -37,8 +38,10 @@ async fn run() -> Result<(), String> {
                 .subcommand_required(true)
                 .about("Bump a package in the workspace")
                 .args(&[
-                    clap::arg!(-p --package <PACKAGE> "Package to bump").required(true),
-                    clap::arg!(-v --version <VERSION> "New version (X.Y.Z)").required(true).value_parser(value_parser!(Version)),
+                    clap::arg!(-p --package <PACKAGE_VERSION> "Package and the version to bump to, e.g. \"pallet-balances 12.0.3\". Supports multiple occurances packages.")
+                        .required(true)
+                        .action(ArgAction::Append)
+                        .value_parser(value_parser!(PackageChange)),
                     clap::arg!(-d --"dry-run" [BOOL] "Whether to dry-run the change")
                         .default_value("false")
                         .default_missing_value("true")
@@ -77,12 +80,10 @@ async fn run() -> Result<(), String> {
             Ok(())
         }
         Some(("bump", matches)) => {
-            let package = matches
-                .get_one::<String>("package")
-                .expect("--package is required");
-            let version = matches
-                .get_one::<Version>("version")
-                .expect("--version is required");
+            let packages = matches
+                .get_many::<PackageChange>("package")
+                .expect("--package is required")
+                .collect::<Vec<_>>();
             let dry_run = matches
                 .get_one::<bool>("dry-run")
                 .expect("--dry-run is required");
@@ -100,8 +101,7 @@ async fn run() -> Result<(), String> {
 
                     commands::bump::stable::exec(
                         &mut workspace,
-                        &package,
-                        &version,
+                        packages,
                         prerelease_workspace,
                         *dry_run,
                     )
