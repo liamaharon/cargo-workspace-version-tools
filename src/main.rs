@@ -1,8 +1,7 @@
-use clap::{value_parser, ArgAction, Args};
+use clap::{value_parser, ArgAction};
 use commands::bump::PackageChange;
 use common::workspace::Workspace;
 use env_logger::Env;
-use semver::Version;
 use std::path::PathBuf;
 
 mod commands;
@@ -32,6 +31,10 @@ async fn run() -> Result<(), String> {
         .subcommand(
             clap::command!("sync")
                 .about("Sync local Cargo.toml files to match crates.io version")
+        )
+        .subcommand(
+            clap::command!("make-prerelease")
+                .about("Make all local Cargo.toml versions prerelease, by appending an \"-alpha.1\" suffix.")
         )
         .subcommand(
             clap::command!("make-at-least-stable")
@@ -81,6 +84,10 @@ async fn run() -> Result<(), String> {
     match matches.subcommand() {
         Some(("sync", _)) => {
             commands::sync::exec(&mut workspace).await;
+            Ok(())
+        }
+        Some(("make-prerelease", _)) => {
+            commands::make_prerelease::exec(&mut workspace).await?;
             Ok(())
         }
         Some(("make-at-least-stable", _)) => {
