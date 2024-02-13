@@ -4,7 +4,7 @@ use super::{
 };
 use crate::common::{
     git::{do_fast_forward, do_fetch, get_current_branch_name, is_working_tree_clean},
-    graph::find_direct_dependents,
+    package::find_direct_dependents,
 };
 use cargo_metadata::MetadataCommand;
 use git2::Repository;
@@ -81,7 +81,7 @@ impl Workspace {
         let workspace_package_map = cargo_metadata_members
             .iter()
             .map(|p| {
-                Package::new(&p, &workspace_member_names)
+                Package::new(&p, &workspace_member_names, branch_name.as_str())
                     .map_err(|e| format!("Failed to load package at {:?}: {}", p, e))
             })
             .fold(HashMap::new(), |mut acc, package_result| {
@@ -96,7 +96,7 @@ impl Workspace {
             });
 
         // Compute and set the dependencies and dependents
-        let workspace_deps_map = workspace_package_map
+        let workspace_deps_string_set = workspace_package_map
             .iter()
             .map(|(name, package)| {
                 (
@@ -112,7 +112,18 @@ impl Workspace {
             .collect::<HashMap<_, _>>();
 
         for (name, package) in workspace_package_map.iter() {
-            let direct_dependents = find_direct_dependents(name, &workspace_deps_map);
+            let direct_dependents = find_direct_dependents(name, &workspace_deps_string_set)
+                .into_iter()
+                .map(|s| {
+                    (
+                        s.clone(),
+                        workspace_package_map
+                            .get(&s)
+                            .expect("just got it bro")
+                            .clone(),
+                    )
+                })
+                .collect::<HashMap<_, _>>();
             package
                 .borrow_mut()
                 .set_direct_dependents(direct_dependents);

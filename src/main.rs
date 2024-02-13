@@ -1,8 +1,7 @@
 use clap::{value_parser, ArgAction};
-use commands::bump::PackageChange;
 use common::workspace::Workspace;
 use env_logger::Env;
-use std::path::PathBuf;
+use std::{borrow::BorrowMut, path::PathBuf};
 
 mod commands;
 mod common;
@@ -45,10 +44,10 @@ async fn run() -> Result<(), String> {
                 .subcommand_required(true)
                 .about("Bump a package in the workspace")
                 .args(&[
-                    clap::arg!(-p --package <PACKAGE_VERSION> "Package and the version to bump to, e.g. \"pallet-balances 12.0.3\". Supports multiple occurances packages.")
+                    clap::arg!(-b --"bump-instruction" <BUMP_INSTRUCTION> "Package and type of bump to make to it, e.g. \"pallet-balances minor\". Supports being passed multiple times to bump multiple packages at once.")
                         .required(true)
                         .action(ArgAction::Append)
-                        .value_parser(value_parser!(PackageChange)),
+                        .value_parser(value_parser!(String)),
                     clap::arg!(-d --"dry-run" [BOOL] "Whether to dry-run the change")
                         .default_value("false")
                         .default_missing_value("true")
@@ -63,7 +62,7 @@ async fn run() -> Result<(), String> {
                 )
                 .subcommand(
                     clap::command!("prerelease")
-                        .about("Bump a package on a prerelease branch")
+                        .about("Bump a package on the prerelease branch")
                         .args(&[
                             clap::arg!(-s --stable <STABLE_BRANCH> "Stable branch to cap the bump at"),
                         ])
@@ -95,9 +94,9 @@ async fn run() -> Result<(), String> {
             Ok(())
         }
         Some(("bump", matches)) => {
-            let packages = matches
-                .get_many::<PackageChange>("package")
-                .expect("--package is required")
+            let bump_instructions = matches
+                .get_many::<String>("bump-instruction")
+                .expect("--bump-instruction is required")
                 .collect::<Vec<_>>();
             let dry_run = matches
                 .get_one::<bool>("dry-run")
@@ -114,15 +113,40 @@ async fn run() -> Result<(), String> {
                         None => None,
                     };
 
-                    commands::bump::stable::exec(
+                    commands::bump::exec_stable(
                         &mut workspace,
-                        packages,
-                        prerelease_workspace,
+                        prerelease_workspace
+                            .expect("Currently must also update prerelease branch")
+                            .borrow_mut(),
+                        bump_instructions
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>(),
                         *dry_run,
                     )
                 }
-                Some(("prerelease", _matches)) => {
-                    todo!()
+                Some(("prerelease", matches)) => {
+                    let stable_workspace = matches
+                        .get_one::<String>("stable")
+                        .map(|b| Workspace::new(&workspace_path, Some(b.as_str()), remote_name));
+
+                    let stable_workspace = match stable_workspace {
+                        Some(Ok(w)) => Some(w),
+                        Some(Err(e)) => return Err(e),
+                        None => None,
+                    };
+
+                    commands::bump::exec_prerelease(
+                        &mut workspace,
+                        stable_workspace
+                            .expect("Currently must also update stable branch")
+                            .borrow_mut(),
+                        bump_instructions
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>(),
+                        *dry_run,
+                    )
                 }
                 _ => unreachable!("clap should ensure we don't get here"),
             }

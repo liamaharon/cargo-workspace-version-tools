@@ -1,6 +1,6 @@
-pub mod colors;
+pub mod bump_tree;
 pub mod git;
-pub mod graph;
+pub mod logging;
 pub mod package;
 pub mod version_extension;
 pub mod workspace;

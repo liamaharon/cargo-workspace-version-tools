@@ -234,7 +234,7 @@ pub fn stage_and_commit_all_changes(
     )?;
 
     log::info!(
-        "✅ Staged and committed changes to branch {}: {}",
+        "📝 Staged and committed changes to branch {}: {}",
         branch_name,
         new_commit_iod
     );

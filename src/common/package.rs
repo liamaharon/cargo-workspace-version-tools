@@ -1,8 +1,15 @@
-use crate::common::version_extension::VersionExtension;
 use cargo_metadata::DependencyKind;
 use crates_io_api::AsyncClient;
 use semver::Version;
-use std::{collections::HashSet, fmt::Display, fs, path::PathBuf};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    fs,
+    hash::{Hash, Hasher},
+    path::PathBuf,
+    rc::Rc,
+};
 use toml_edit::{Document, Table};
 
 /// A wrapper around the toml_edit Document with convenience methods
@@ -15,7 +22,24 @@ pub struct Package {
     /// Direct, non-development dependencies that are also workspace members
     direct_workspace_dependencies: HashSet<String>,
     /// Direct, non-development dependents that are also workspace members
-    direct_workspace_dependents: Option<HashSet<String>>,
+    direct_workspace_dependents: Option<HashMap<String, Rc<RefCell<Package>>>>,
+    /// Branch name
+    pub branch: String,
+}
+
+impl PartialEq for Package {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path && self.branch == other.branch
+    }
+}
+
+impl Eq for Package {}
+
+impl Hash for Package {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
+        self.branch.hash(state);
+    }
 }
 
 impl Display for Package {
@@ -58,29 +82,32 @@ impl Package {
             .expect(format!("Failed to create Version from {:?} version", self.path).as_str())
     }
 
-    pub fn direct_workspace_dependents(&self) -> &HashSet<String> {
-        self.direct_workspace_dependents
+    pub fn direct_workspace_dependents(&self) -> impl Iterator<Item = Rc<RefCell<Package>>> {
+        let a = self
+            .direct_workspace_dependents
             .as_ref()
             .expect("Direct dependents not initialized")
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter();
+
+        a
     }
 
     pub fn direct_workspace_dependencies(&self) -> &HashSet<String> {
         &self.direct_workspace_dependencies
     }
 
-    pub fn set_direct_dependents(self: &mut Self, direct_dependents: HashSet<String>) {
+    pub fn set_direct_dependents(
+        self: &mut Self,
+        direct_dependents: HashMap<String, Rc<RefCell<Package>>>,
+    ) {
         self.direct_workspace_dependents = Some(direct_dependents);
     }
 
     pub fn set_version(self: &mut Self, version: &Version) {
-        let bump_type = version.bump_type(&self.version());
-        log::debug!(
-            "Bumping {} ({} -> {}) [{}]",
-            self.name(),
-            self.version(),
-            &version,
-            bump_type
-        );
+        log::debug!("Bumping {} to {}", self.name(), version);
 
         self.package_mut()["version"] = toml_edit::value(version.to_string());
         fs::write(self.path.clone(), self.doc.to_string())
@@ -111,6 +138,7 @@ impl Package {
     pub fn new(
         cargo_metadata_package: &cargo_metadata::Package,
         workspace_members: &HashSet<String>,
+        branch: &str,
     ) -> Result<Self, String> {
         let path = cargo_metadata_package.manifest_path.clone();
         let content = fs::read_to_string(&path).map_err(|e| {
@@ -125,6 +153,7 @@ impl Package {
 
         Ok(Self {
             doc,
+            branch: branch.to_owned(),
             direct_workspace_dependents: None,
             direct_workspace_dependencies: cargo_metadata_package
                 .dependencies
@@ -137,5 +166,59 @@ impl Package {
                 .collect(),
             path: path.into(),
         })
+    }
+}
+
+/// Finds all direct dependents of a given package.
+pub fn find_direct_dependents(
+    package: &str,
+    workspace_deps: &HashMap<String, HashSet<String>>,
+) -> HashSet<String> {
+    let mut dependents = HashSet::new();
+    for (name, deps) in workspace_deps {
+        if deps.contains(package) {
+            dependents.insert(name.clone());
+        }
+    }
+    dependents
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{HashMap, HashSet};
+
+    /// Simple dependency graph
+    /// package_a depends on package_b and package_c
+    /// package_b depends on package_c
+    /// package_c has no dependencies
+    fn create_mock_workspace_deps() -> HashMap<String, HashSet<String>> {
+        let mut workspace_deps = HashMap::new();
+
+        workspace_deps.insert(
+            "package_a".to_string(),
+            HashSet::from(["package_b".to_string(), "package_c".to_string()]),
+        );
+        workspace_deps.insert(
+            "package_b".to_string(),
+            HashSet::from(["package_c".to_string()]),
+        );
+        workspace_deps.insert("package_c".to_string(), HashSet::new());
+
+        workspace_deps
+    }
+
+    #[test]
+    fn test_find_direct_dependents() {
+        let workspace_deps = create_mock_workspace_deps();
+        let direct_dependents_c = find_direct_dependents("package_c", &workspace_deps);
+        assert!(direct_dependents_c.contains("package_a"));
+        assert!(direct_dependents_c.contains("package_b"));
+        assert_eq!(direct_dependents_c.len(), 2);
+        let direct_dependents_b = find_direct_dependents("package_b", &workspace_deps);
+        assert!(direct_dependents_b.contains("package_a"));
+        assert_eq!(direct_dependents_b.len(), 1);
+        let direct_dependents_a = find_direct_dependents("package_a", &workspace_deps);
+        assert!(direct_dependents_a.is_empty());
     }
 }
