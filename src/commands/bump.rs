@@ -2,7 +2,7 @@ use crate::common::logging::{self, Color};
 use crate::common::version_extension::VersionExtension;
 use crate::common::workspace::{self};
 
-use crate::common::bump_tree::{BranchType, BumpInstruction, BumpTree};
+use crate::common::bump_tree::{BumpInstruction, BumpTree, ReleaseChannel};
 
 pub fn exec_stable(
     stable_workspace: &mut workspace::Workspace,
@@ -18,7 +18,7 @@ pub fn exec_stable(
                 stable_workspace,
                 prerelease_workspace,
                 s,
-                &BranchType::Stable,
+                ReleaseChannel::Stable,
             )
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -27,7 +27,7 @@ pub fn exec_stable(
         stable_workspace,
         prerelease_workspace,
         bump_instructions,
-        BranchType::Stable,
+        ReleaseChannel::Stable,
     );
 
     println!("{}", bump_tree);
@@ -41,7 +41,7 @@ pub fn exec_stable(
         "Applying stable version bumps to branch '{}'",
         stable_workspace.branch_name
     );
-    logging::bordered_message(msg.as_str(), &Color::Blue);
+    logging::bordered_message(msg.as_str(), Color::Blue);
     stable_workspace.checkout_local_branch()?;
     for (_, n) in bump_tree.highest_stable.iter() {
         let bump_instruction = n.stable.as_ref().expect("must exist here");
@@ -49,7 +49,7 @@ pub fn exec_stable(
             .package
             .borrow()
             .version()
-            .bump(&bump_instruction.bump_type);
+            .bump(bump_instruction.bump_type, ReleaseChannel::Stable);
         bump_instruction
             .package
             .borrow_mut()
@@ -68,7 +68,7 @@ pub fn exec_stable(
             "Applying prerelease version bumps to branch '{}'",
             prerelease_workspace.branch_name
         );
-        logging::bordered_message(msg.as_str(), &Color::Blue);
+        logging::bordered_message(msg.as_str(), Color::Blue);
         prerelease_workspace.checkout_local_branch()?;
 
         let prerelease_branch_name = format!(
@@ -90,7 +90,7 @@ pub fn exec_stable(
                 .package
                 .borrow()
                 .version()
-                .bump(&bump_instruction.bump_type);
+                .bump(bump_instruction.bump_type, ReleaseChannel::Stable);
             bump_instruction
                 .package
                 .borrow_mut()
@@ -114,7 +114,7 @@ pub fn exec_stable(
         "Done! Checking back out to stable branch '{}' before exiting",
         stable_workspace.branch_name
     );
-    logging::bordered_message(msg.as_str(), &Color::Green);
+    logging::bordered_message(msg.as_str(), Color::Green);
     stable_workspace.checkout_local_branch()?;
 
     Ok(())
@@ -134,7 +134,7 @@ pub fn exec_prerelease(
                 stable_workspace,
                 prerelease_workspace,
                 s,
-                &BranchType::Prerelease,
+                ReleaseChannel::Prerelease,
             )
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -143,8 +143,14 @@ pub fn exec_prerelease(
         stable_workspace,
         prerelease_workspace,
         bump_instructions,
-        BranchType::Stable,
+        ReleaseChannel::Prerelease,
     );
+    prerelease_workspace.checkout_local_branch()?;
+
+    if bump_tree.root_nodes.is_empty() {
+        logging::bordered_message("No bumps to apply, exiting early.", Color::Green);
+        return Ok(());
+    }
 
     println!("{}", bump_tree);
 
@@ -153,19 +159,18 @@ pub fn exec_prerelease(
         return Ok(());
     }
 
-    prerelease_workspace.checkout_local_branch()?;
     let msg = format!(
         "Applying prerelease version bumps to branch '{}'",
         prerelease_workspace.branch_name
     );
-    logging::bordered_message(msg.as_str(), &Color::Blue);
+    logging::bordered_message(msg.as_str(), Color::Blue);
     for (_, n) in bump_tree.highest_prerelease.iter() {
         let bump_instruction = n.prerelease.as_ref().expect("must exist here");
         let next_version = &bump_instruction
             .package
             .borrow()
             .version()
-            .bump(&bump_instruction.bump_type);
+            .bump(bump_instruction.bump_type, ReleaseChannel::Prerelease);
         bump_instruction
             .package
             .borrow_mut()

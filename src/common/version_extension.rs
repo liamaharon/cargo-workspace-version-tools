@@ -1,5 +1,7 @@
-use semver::Version;
+use semver::{Prerelease, Version};
 use std::cmp::Ordering;
+
+use super::bump_tree::ReleaseChannel;
 
 // #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 // pub enum BumpType {
@@ -46,31 +48,40 @@ impl Ord for BumpType {
 }
 
 pub trait VersionExtension {
-    fn bump(self: &Self, bump_type: &BumpType) -> Version;
+    fn bump(self: &Self, bump_type: BumpType, release_channel: ReleaseChannel) -> Version;
 }
 
 impl VersionExtension for Version {
-    fn bump(self: &Self, bump_type: &BumpType) -> Version {
+    fn bump(self: &Self, bump_type: BumpType, release_channel: ReleaseChannel) -> Version {
+        let mut next_version = self.clone();
         match bump_type {
             BumpType::Major => {
-                let mut next_version = self.clone();
                 next_version.major += 1;
                 next_version.minor = 0;
                 next_version.patch = 0;
-                next_version
             }
             BumpType::Minor => {
-                let mut next_version = self.clone();
                 next_version.minor += 1;
                 next_version.patch = 0;
-                next_version
             }
             BumpType::Patch => {
-                let mut next_version = self.clone();
                 next_version.patch += 1;
-                next_version
+            }
+        };
+
+        match release_channel {
+            ReleaseChannel::Stable => {
+                if !next_version.pre.is_empty() {
+                    log::warn!("Unexpected prerelease-suffix on version in stable release channel");
+                }
+            }
+            ReleaseChannel::Prerelease => {
+                if next_version.pre.is_empty() {
+                    next_version.pre = Prerelease::new("alpha").expect("Is valid")
+                }
             }
         }
+        next_version
     }
 }
 

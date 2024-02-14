@@ -55,6 +55,7 @@ impl Workspace {
             return Err("Workspace is not clean. Please commit or stash your changes.".to_owned());
         }
 
+        checkout_local_branch(&repo, &branch_name).map_err(|e| e.to_string())?;
         log::info!(
             "Pulling latest changes from remote '{} {}'",
             &remote_name,

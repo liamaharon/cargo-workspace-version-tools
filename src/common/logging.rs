@@ -19,7 +19,7 @@ impl ToString for Color {
     }
 }
 
-pub fn bordered_message(message: &str, color: &Color) {
+pub fn bordered_message(message: &str, color: Color) {
     let color = color.to_string();
     log::info!("{}{}", color, "-".repeat(message.len()));
     log::info!("{}{}", color, message);

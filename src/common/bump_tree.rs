@@ -10,13 +10,13 @@ use super::workspace::Workspace;
 use super::{package::Package, version_extension::BumpType};
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum BranchType {
+pub enum ReleaseChannel {
     Stable,
     Prerelease,
 }
 
 pub struct BumpTree<'a> {
-    root_nodes: Vec<Rc<BumpNode>>,
+    pub root_nodes: Vec<Rc<BumpNode>>,
     pub highest_stable: HashMap<String, Rc<BumpNode>>,
     pub highest_prerelease: HashMap<String, Rc<BumpNode>>,
     stable_workspace: &'a Workspace,
@@ -41,7 +41,7 @@ impl BumpInstruction {
         stable_workspace: &Workspace,
         prerelease_workspace: &Workspace,
         s: &str,
-        branch_type: &BranchType,
+        release_channel: ReleaseChannel,
     ) -> Result<BumpInstruction, String> {
         let parts: Vec<&str> = s.splitn(2, ' ').collect();
         let name = parts[0].to_string();
@@ -50,12 +50,12 @@ impl BumpInstruction {
             .map(|b| BumpType::from_str(b))
             .unwrap_or_else(|| Err(format!("Invalid Bump Instruction: '{}'", s).to_string()))?;
 
-        let package = match branch_type {
-            BranchType::Stable => stable_workspace.packages.get(&name).ok_or(format!(
+        let package = match release_channel {
+            ReleaseChannel::Stable => stable_workspace.packages.get(&name).ok_or(format!(
                 "Package {} not found on branch {}",
                 name, stable_workspace.branch_name
             )),
-            BranchType::Prerelease => prerelease_workspace.packages.get(&name).ok_or(format!(
+            ReleaseChannel::Prerelease => prerelease_workspace.packages.get(&name).ok_or(format!(
                 "Package {} not found on branch {}",
                 name, prerelease_workspace.branch_name
             )),
@@ -87,7 +87,7 @@ impl<'a> BumpTree<'a> {
         stable_workspace: &'a Workspace,
         prerelease_workspace: &'a Workspace,
         root_instructions: Vec<BumpInstruction>,
-        branch_type: BranchType,
+        release_channel: ReleaseChannel,
     ) -> Self {
         let mut tree = Self {
             root_nodes: vec![],
@@ -99,20 +99,26 @@ impl<'a> BumpTree<'a> {
 
         let root_nodes: Vec<_> = root_instructions
             .into_iter()
-            .map(|i| match branch_type {
-                // Prerelease is easy, there's never any bump instruction for stable.
-                BranchType::Prerelease => tree.new_node(None, Some(i)),
-                // Stable bumps may also involve prerelease bumps
-                BranchType::Stable => {
-                    let prerelease_bump_instruction = compute_prerelease_bump_instruction(
-                        prerelease_workspace
-                            .packages
-                            .get(&i.package.borrow().name()),
-                        Some(&i.package),
-                        Some(&i),
-                        None,
-                    );
-                    tree.new_node(Some(i), prerelease_bump_instruction)
+            .filter_map(|i| {
+                let prerelease_bump_instruction = compute_prerelease_bump_instruction(
+                    prerelease_workspace
+                        .packages
+                        .get(&i.package.borrow().name()),
+                    stable_workspace.packages.get(&i.package.borrow().name()),
+                    Some(&i),
+                    None,
+                );
+                match (&release_channel, &prerelease_bump_instruction) {
+                    // Handle a prerelease root node that doesn't need any bump applied
+                    (ReleaseChannel::Prerelease, None) => None,
+                    // Prerelease root node that does need bump applied
+                    (ReleaseChannel::Prerelease, Some(_)) => {
+                        Some(tree.new_node(None, prerelease_bump_instruction))
+                    }
+                    // Stable always needs to bump
+                    (ReleaseChannel::Stable, _) => {
+                        Some(tree.new_node(Some(i), prerelease_bump_instruction))
+                    }
                 }
             })
             .collect();
@@ -247,7 +253,7 @@ impl<'a> BumpTree<'a> {
 
         let stable_bump_details = if let Some(i) = &node.stable {
             let cur = i.package.borrow().version();
-            let next = cur.bump(&i.bump_type);
+            let next = cur.bump(i.bump_type, ReleaseChannel::Stable);
             let color = match i.bump_type {
                 BumpType::Major => RED,
                 _ => BLUE,
@@ -259,7 +265,7 @@ impl<'a> BumpTree<'a> {
 
         let prerelease_bump_details = if let Some(i) = &node.prerelease {
             let cur = i.package.borrow().version();
-            let next = cur.bump(&i.bump_type);
+            let next = cur.bump(i.bump_type, ReleaseChannel::Prerelease);
             let color = match i.bump_type {
                 BumpType::Major => RED,
                 _ => BLUE,
@@ -351,10 +357,17 @@ fn compute_prerelease_bump_instruction(
             Some(BumpType::Major) if prerelease_version.major == stable_version.major => {
                 Some(BumpType::Major)
             }
-            Some(BumpType::Minor) if prerelease_version.minor == stable_version.minor => {
+            Some(BumpType::Minor)
+                if prerelease_version.major == stable_version.major
+                    && prerelease_version.minor == stable_version.minor =>
+            {
                 Some(BumpType::Minor)
             }
-            Some(BumpType::Patch) if prerelease_version.patch == stable_version.patch => {
+            Some(BumpType::Patch)
+                if prerelease_version.major == stable_version.major
+                    && prerelease_version.minor == stable_version.minor
+                    && prerelease_version.patch == stable_version.patch =>
+            {
                 Some(BumpType::Patch)
             }
             _ => None,

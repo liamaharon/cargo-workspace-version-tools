@@ -1,3 +1,11 @@
+//! Cargo Workspace Version Tools is a CLI to ease the complexity of managing package versions in large Cargo
+//! workspaces containing inter-dependent packages.
+//!
+//! It is opinionated in assuming the workspace wishes packages to follow SemVer version.
+//!
+//! In addition to supporting a single release channel, it also supports dual stable/prerelease
+//! release channels where the prerelease channel is periodically merged into stable.
+
 use clap::{value_parser, ArgAction};
 use common::workspace::Workspace;
 use env_logger::Env;
@@ -32,10 +40,6 @@ async fn run() -> Result<(), String> {
                 .about("Sync local Cargo.toml files to match crates.io version")
         )
         .subcommand(
-            clap::command!("make-prerelease")
-                .about("Make all local Cargo.toml versions prerelease, by appending an \"-alpha.1\" suffix.")
-        )
-        .subcommand(
             clap::command!("make-at-least-stable")
                 .about("Make local Cargo.toml versions support compatible bumps by removing prerelease suffixes and bumping to at least 0.1.0.")
         )
@@ -57,14 +61,14 @@ async fn run() -> Result<(), String> {
                     clap::command!("stable")
                         .about("Bump a package on the stable branch")
                         .args(&[
-                            clap::arg!(-p --"update-prerelease" <PRERELEASE_BRANCH> "Also update a prerelease branch to keep the version distance the same after this change"),
+                            clap::arg!(-p --"prerelease-branch" <PRERELEASE_BRANCH> "Also update a prerelease branch to keep the version distance the same after this change"),
                         ])
                 )
                 .subcommand(
                     clap::command!("prerelease")
                         .about("Bump a package on the prerelease branch")
                         .args(&[
-                            clap::arg!(-s --stable <STABLE_BRANCH> "Stable branch to cap the bump at"),
+                            clap::arg!(-s --"stable-branch" <STABLE_BRANCH> "Stable branch to cap the bump at"),
                         ])
                 )
         );
@@ -85,10 +89,6 @@ async fn run() -> Result<(), String> {
             commands::sync::exec(&mut workspace).await;
             Ok(())
         }
-        Some(("make-prerelease", _)) => {
-            commands::make_prerelease::exec(&mut workspace).await?;
-            Ok(())
-        }
         Some(("make-at-least-stable", _)) => {
             commands::make_at_least_stable::exec(&mut workspace).await;
             Ok(())
@@ -104,7 +104,7 @@ async fn run() -> Result<(), String> {
             match matches.subcommand() {
                 Some(("stable", matches)) => {
                     let prerelease_workspace = matches
-                        .get_one::<String>("update-prerelease")
+                        .get_one::<String>("prerelease-branch")
                         .map(|b| Workspace::new(&workspace_path, Some(b.as_str()), remote_name));
 
                     let prerelease_workspace = match prerelease_workspace {
@@ -127,7 +127,7 @@ async fn run() -> Result<(), String> {
                 }
                 Some(("prerelease", matches)) => {
                     let stable_workspace = matches
-                        .get_one::<String>("stable")
+                        .get_one::<String>("stable-branch")
                         .map(|b| Workspace::new(&workspace_path, Some(b.as_str()), remote_name));
 
                     let stable_workspace = match stable_workspace {
@@ -137,10 +137,10 @@ async fn run() -> Result<(), String> {
                     };
 
                     commands::bump::exec_prerelease(
-                        &mut workspace,
                         stable_workspace
                             .expect("Currently must also update stable branch")
                             .borrow_mut(),
+                        &mut workspace,
                         bump_instructions
                             .iter()
                             .map(|s| s.as_str())
