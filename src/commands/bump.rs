@@ -135,11 +135,6 @@ pub fn exec_prerelease(
         })
         .collect::<Result<Vec<_>, String>>()?;
 
-    dbg!(bump_instructions
-        .clone()
-        .iter()
-        .map(|i| i.next_version.clone())
-        .collect::<Vec<_>>());
     let bump_tree = BumpTree::new(
         stable_workspace,
         prerelease_workspace,
