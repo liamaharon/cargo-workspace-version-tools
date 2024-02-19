@@ -1,13 +1,5 @@
 use semver::{Prerelease, Version};
-use std::cmp::Ordering;
-
-use super::bump_tree::ReleaseChannel;
-
-// #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-// pub enum BumpType {
-//     Breaking,
-//     Compatible,
-// }
+use std::{cmp::Ordering, str::FromStr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BumpType {
@@ -32,9 +24,11 @@ impl PartialOrd for BumpType {
         match (self, other) {
             (BumpType::Major, BumpType::Major) => Some(Ordering::Equal),
             (BumpType::Major, _) => Some(Ordering::Greater),
+
             (BumpType::Minor, BumpType::Major) => Some(Ordering::Less),
             (BumpType::Minor, BumpType::Minor) => Some(Ordering::Equal),
             (BumpType::Minor, BumpType::Patch) => Some(Ordering::Greater),
+
             (BumpType::Patch, BumpType::Patch) => Some(Ordering::Equal),
             (BumpType::Patch, _) => Some(Ordering::Less),
         }
@@ -48,16 +42,21 @@ impl Ord for BumpType {
 }
 
 pub trait VersionExtension {
-    fn bump(self: &Self, bump_type: BumpType, release_channel: ReleaseChannel) -> Version;
+    fn bump(self: &Self, bump_type: BumpType) -> Version;
+    fn with_prerelease(self: &Self) -> Version;
 }
 
 impl VersionExtension for Version {
-    fn bump(self: &Self, bump_type: BumpType, release_channel: ReleaseChannel) -> Version {
+    fn bump(self: &Self, bump_type: BumpType) -> Version {
         let mut next_version = self.clone();
         match bump_type {
             BumpType::Major => {
-                next_version.major += 1;
-                next_version.minor = 0;
+                if self.major > 0 {
+                    next_version.major += 1;
+                    next_version.minor = 0;
+                } else {
+                    next_version.minor += 1;
+                }
                 next_version.patch = 0;
             }
             BumpType::Minor => {
@@ -68,19 +67,12 @@ impl VersionExtension for Version {
                 next_version.patch += 1;
             }
         };
+        next_version
+    }
 
-        match release_channel {
-            ReleaseChannel::Stable => {
-                if !next_version.pre.is_empty() {
-                    log::warn!("Unexpected prerelease-suffix on version in stable release channel");
-                }
-            }
-            ReleaseChannel::Prerelease => {
-                if next_version.pre.is_empty() {
-                    next_version.pre = Prerelease::new("alpha").expect("Is valid")
-                }
-            }
-        }
+    fn with_prerelease(self: &Self) -> Version {
+        let mut next_version = self.clone();
+        next_version.pre = Prerelease::from_str("alpha").expect("valid");
         next_version
     }
 }

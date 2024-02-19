@@ -1,8 +1,6 @@
-use crate::common::logging::{self, Color};
-use crate::common::version_extension::VersionExtension;
-use crate::common::workspace::{self};
-
 use crate::common::bump_tree::{BumpInstruction, BumpTree, ReleaseChannel};
+use crate::common::logging::{self, Color};
+use crate::common::workspace::{self};
 
 pub fn exec_stable(
     stable_workspace: &mut workspace::Workspace,
@@ -13,13 +11,20 @@ pub fn exec_stable(
     log::info!("⏳Building bump tree...");
     let bump_instructions = raw_bump_instructions
         .iter()
-        .map(|s| {
-            BumpInstruction::from_str(
+        .filter_map(|s| {
+            match BumpInstruction::from_str(
                 stable_workspace,
                 prerelease_workspace,
                 s,
                 ReleaseChannel::Stable,
-            )
+            ) {
+                Ok(Some(i)) => Some(Ok(i)),
+                Ok(None) => {
+                    log::info!("Unnecesarry to apply bump {}, skipping", s);
+                    None
+                }
+                Err(e) => Some(Err(e)),
+            }
         })
         .collect::<Result<Vec<_>, String>>()?;
 
@@ -44,16 +49,8 @@ pub fn exec_stable(
     logging::bordered_message(msg.as_str(), Color::Blue);
     stable_workspace.checkout_local_branch()?;
     for (_, n) in bump_tree.highest_stable.iter() {
-        let bump_instruction = n.stable.as_ref().expect("must exist here");
-        let next_version = &bump_instruction
-            .package
-            .borrow()
-            .version()
-            .bump(bump_instruction.bump_type, ReleaseChannel::Stable);
-        bump_instruction
-            .package
-            .borrow_mut()
-            .set_version(&next_version);
+        let i = n.stable.as_ref().expect("must exist here");
+        i.package.borrow_mut().set_version(&i.next_version);
     }
 
     stable_workspace.update_lockfile()?;
@@ -85,16 +82,8 @@ pub fn exec_stable(
             .map_err(|e| e.to_string())?;
 
         for (_, n) in bump_tree.highest_prerelease.iter() {
-            let bump_instruction = n.prerelease.as_ref().expect("must exist here");
-            let next_version = &bump_instruction
-                .package
-                .borrow()
-                .version()
-                .bump(bump_instruction.bump_type, ReleaseChannel::Stable);
-            bump_instruction
-                .package
-                .borrow_mut()
-                .set_version(&next_version);
+            let i = n.prerelease.as_ref().expect("must exist here");
+            i.package.borrow_mut().set_version(&i.next_version);
         }
 
         prerelease_workspace.update_lockfile()?;
@@ -129,16 +118,28 @@ pub fn exec_prerelease(
     log::info!("⏳Building bump tree...");
     let bump_instructions = raw_bump_instructions
         .iter()
-        .map(|s| {
-            BumpInstruction::from_str(
+        .filter_map(|s| {
+            match BumpInstruction::from_str(
                 stable_workspace,
                 prerelease_workspace,
                 s,
                 ReleaseChannel::Prerelease,
-            )
+            ) {
+                Ok(Some(i)) => Some(Ok(i)),
+                Ok(None) => {
+                    log::info!("Unnecesarry to apply bump {}, skipping", s);
+                    None
+                }
+                Err(e) => Some(Err(e)),
+            }
         })
         .collect::<Result<Vec<_>, String>>()?;
 
+    dbg!(bump_instructions
+        .clone()
+        .iter()
+        .map(|i| i.next_version.clone())
+        .collect::<Vec<_>>());
     let bump_tree = BumpTree::new(
         stable_workspace,
         prerelease_workspace,
@@ -165,16 +166,8 @@ pub fn exec_prerelease(
     );
     logging::bordered_message(msg.as_str(), Color::Blue);
     for (_, n) in bump_tree.highest_prerelease.iter() {
-        let bump_instruction = n.prerelease.as_ref().expect("must exist here");
-        let next_version = &bump_instruction
-            .package
-            .borrow()
-            .version()
-            .bump(bump_instruction.bump_type, ReleaseChannel::Prerelease);
-        bump_instruction
-            .package
-            .borrow_mut()
-            .set_version(&next_version);
+        let i = n.prerelease.as_ref().expect("must exist here");
+        i.package.borrow_mut().set_version(&i.next_version);
     }
 
     prerelease_workspace.update_lockfile()?;

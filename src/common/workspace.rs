@@ -3,7 +3,7 @@ use super::{
     package::Package,
 };
 use crate::common::{
-    git::{do_fast_forward, do_fetch, get_current_branch_name, is_working_tree_clean},
+    git::{get_current_branch_name, is_working_tree_clean},
     package::find_direct_dependents,
 };
 use cargo_metadata::MetadataCommand;
@@ -56,17 +56,19 @@ impl Workspace {
         }
 
         checkout_local_branch(&repo, &branch_name).map_err(|e| e.to_string())?;
-        log::info!(
-            "Pulling latest changes from remote '{} {}'",
-            &remote_name,
-            &branch_name
-        );
-        let mut remote = repo
-            .find_remote(&remote_name)
-            .map_err(|e| format!("{}", e))?;
-        let fetch_commit =
-            do_fetch(&repo, &[&branch_name], &mut remote).map_err(|e| format!("{}", e))?;
-        do_fast_forward(&repo, &branch_name, fetch_commit).map_err(|e| format!("{}", e))?;
+
+        // Disable pulling for now...
+        // log::info!(
+        //     "Pulling latest changes from remote '{} {}'",
+        //     &remote_name,
+        //     &branch_name
+        // );
+        // let mut remote = repo
+        //     .find_remote(&remote_name)
+        //     .map_err(|e| format!("{}", e))?;
+        // let fetch_commit =
+        //     do_fetch(&repo, &[&branch_name], &mut remote).map_err(|e| format!("{}", e))?;
+        // do_fast_forward(&repo, &branch_name, fetch_commit).map_err(|e| format!("{}", e))?;
 
         // Create the Packages
         let metadata = MetadataCommand::new()

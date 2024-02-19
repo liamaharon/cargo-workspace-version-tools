@@ -47,6 +47,7 @@ pub fn is_working_tree_clean<'a>(repo: &'a Repository) -> bool {
     true
 }
 
+#[allow(unused)]
 pub fn do_fetch<'a>(
     repo: &'a Repository,
     refs: &[&str],
@@ -136,6 +137,7 @@ pub fn fast_forward(
     Ok(())
 }
 
+#[allow(unused)]
 pub fn do_fast_forward<'a>(
     repo: &'a Repository,
     remote_branch: &str,

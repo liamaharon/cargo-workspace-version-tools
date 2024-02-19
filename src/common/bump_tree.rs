@@ -1,13 +1,12 @@
-use core::fmt;
-use std::collections::{HashMap, HashSet};
-use std::fmt::{Display, Formatter};
-use std::{cell::RefCell, rc::Rc};
-
-use crate::common::logging::{BLUE, RED, RESET};
-
 use super::version_extension::VersionExtension;
 use super::workspace::Workspace;
 use super::{package::Package, version_extension::BumpType};
+use crate::common::logging::{BLUE, RED, RESET};
+use core::fmt;
+use semver::Version;
+use std::collections::{HashMap, HashSet};
+use std::fmt::{Display, Formatter};
+use std::{cell::RefCell, rc::Rc};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ReleaseChannel {
@@ -33,16 +32,31 @@ pub struct BumpNode {
 #[derive(Debug, Clone)]
 pub struct BumpInstruction {
     pub package: Rc<RefCell<Package>>,
-    pub bump_type: BumpType,
+    pub next_version: Version,
 }
 
 impl BumpInstruction {
+    pub fn bump_type(&self) -> BumpType {
+        let cur_version = self.package.borrow().version();
+        if self.next_version.major > cur_version.major
+            || (self.next_version.major == 0
+                && cur_version.major == 0
+                && self.next_version.minor > cur_version.minor)
+        {
+            BumpType::Major
+        } else if self.next_version.minor > cur_version.minor {
+            BumpType::Minor
+        } else {
+            BumpType::Patch
+        }
+    }
+
     pub fn from_str(
         stable_workspace: &Workspace,
         prerelease_workspace: &Workspace,
         s: &str,
         release_channel: ReleaseChannel,
-    ) -> Result<BumpInstruction, String> {
+    ) -> Result<Option<BumpInstruction>, String> {
         let parts: Vec<&str> = s.splitn(2, ' ').collect();
         let name = parts[0].to_string();
         let semver_part = parts
@@ -50,21 +64,89 @@ impl BumpInstruction {
             .map(|b| BumpType::from_str(b))
             .unwrap_or_else(|| Err(format!("Invalid Bump Instruction: '{}'", s).to_string()))?;
 
-        let package = match release_channel {
-            ReleaseChannel::Stable => stable_workspace.packages.get(&name).ok_or(format!(
-                "Package {} not found on branch {}",
-                name, stable_workspace.branch_name
-            )),
-            ReleaseChannel::Prerelease => prerelease_workspace.packages.get(&name).ok_or(format!(
+        let stable_package = match (stable_workspace.packages.get(&name), &release_channel) {
+            // If we have a package, we can proceed
+            (Some(p), _) => p,
+            // Doesn't make sense to try to bump a stable package doesn't exist
+            (None, ReleaseChannel::Stable) => {
+                return Err(format!(
+                    "Package {} not found on branch {}",
+                    name, prerelease_workspace.branch_name
+                ))
+            }
+            (None, ReleaseChannel::Prerelease) => {
+                // If there's no stable package for a prerelease bump, there's no need to do anything.
+                return Ok(None);
+            }
+        };
+        let cur_stable_version = stable_package.borrow().version();
+
+        match (release_channel, prerelease_workspace.packages.get(&name)) {
+            // Stable is easy, just bump the version.
+            (ReleaseChannel::Stable, _) => Ok(Some(BumpInstruction {
+                package: stable_package.clone(),
+                next_version: cur_stable_version.bump(semver_part),
+            })),
+            // Handle no prerelease package when user asking to bump it
+            (ReleaseChannel::Prerelease, None) => Err(format!(
                 "Package {} not found on branch {}",
                 name, prerelease_workspace.branch_name
             )),
-        }?;
+            // Prerelease, need to determine what the next version should be relative to the
+            // existing stable package.
+            (ReleaseChannel::Prerelease, Some(prerelease_package)) => {
+                let cur_prerelease_version = prerelease_package.borrow().version();
+                match semver_part {
+                    BumpType::Major => {
+                        // Ignore minor bump if already ahead on major
+                        if cur_prerelease_version.major > cur_stable_version.major {
+                            return Ok(None);
+                        }
 
-        Ok(BumpInstruction {
-            package: package.clone(),
-            bump_type: semver_part,
-        })
+                        // Need to bump to stable major+1
+                        Ok(Some(BumpInstruction {
+                            package: prerelease_package.clone(),
+                            next_version: cur_stable_version
+                                .bump(BumpType::Major)
+                                .with_prerelease(),
+                        }))
+                    }
+                    BumpType::Minor => {
+                        // Ignore minor bump if already ahead on major or minor
+                        if cur_prerelease_version.major > cur_stable_version.major
+                            || cur_prerelease_version.minor > cur_stable_version.minor
+                        {
+                            return Ok(None);
+                        }
+
+                        // Need to bump to stable minor+1
+                        Ok(Some(BumpInstruction {
+                            package: prerelease_package.clone(),
+                            next_version: cur_stable_version
+                                .bump(BumpType::Minor)
+                                .with_prerelease(),
+                        }))
+                    }
+                    BumpType::Patch => {
+                        // Ignore minor bump if already ahead on major or minor or patch
+                        if cur_prerelease_version.major > cur_stable_version.major
+                            || cur_prerelease_version.minor > cur_stable_version.minor
+                            || cur_prerelease_version.patch > cur_stable_version.patch
+                        {
+                            return Ok(None);
+                        }
+
+                        // Need to bump to stable patch+1
+                        Ok(Some(BumpInstruction {
+                            package: prerelease_package.clone(),
+                            next_version: cur_stable_version
+                                .bump(BumpType::Patch)
+                                .with_prerelease(),
+                        }))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -78,7 +160,7 @@ impl PartialEq for BumpInstruction {
     fn eq(&self, other: &Self) -> bool {
         self.package.borrow().name() == other.package.borrow().name()
             && self.package.borrow().branch == other.package.borrow().branch
-            && self.bump_type == other.bump_type
+            && self.bump_type() == other.bump_type()
     }
 }
 
@@ -99,27 +181,19 @@ impl<'a> BumpTree<'a> {
 
         let root_nodes: Vec<_> = root_instructions
             .into_iter()
-            .filter_map(|i| {
-                let prerelease_bump_instruction = compute_prerelease_bump_instruction(
-                    prerelease_workspace
-                        .packages
-                        .get(&i.package.borrow().name()),
-                    stable_workspace.packages.get(&i.package.borrow().name()),
-                    Some(&i),
-                    None,
-                );
-                match (&release_channel, &prerelease_bump_instruction) {
-                    // Handle a prerelease root node that doesn't need any bump applied
-                    (ReleaseChannel::Prerelease, None) => None,
-                    // Prerelease root node that does need bump applied
-                    (ReleaseChannel::Prerelease, Some(_)) => {
-                        Some(tree.new_node(None, prerelease_bump_instruction))
-                    }
-                    // Stable always needs to bump
-                    (ReleaseChannel::Stable, _) => {
-                        Some(tree.new_node(Some(i), prerelease_bump_instruction))
-                    }
-                }
+            .map(|i| match release_channel {
+                ReleaseChannel::Prerelease => tree.new_node(None, Some(i)),
+                ReleaseChannel::Stable => tree.new_node(
+                    Some(i.clone()),
+                    compute_prerelease_bump_instruction(
+                        prerelease_workspace
+                            .packages
+                            .get(&i.package.borrow().name()),
+                        stable_workspace.packages.get(&i.package.borrow().name()),
+                        Some(&i),
+                        None,
+                    ),
+                ),
             })
             .collect();
 
@@ -168,8 +242,8 @@ impl<'a> BumpTree<'a> {
             self.highest_stable
                 .entry(name.clone())
                 .and_modify(|e| {
-                    if e.stable.as_ref().map(|i| i.bump_type)
-                        < Some(stable_bump_instruction.bump_type)
+                    if e.stable.as_ref().map(|i| i.bump_type())
+                        < Some(stable_bump_instruction.bump_type())
                     {
                         *e = bump_node.clone()
                     }
@@ -182,8 +256,8 @@ impl<'a> BumpTree<'a> {
             self.highest_prerelease
                 .entry(name.clone())
                 .and_modify(|e| {
-                    if e.prerelease.as_ref().map(|i| i.bump_type)
-                        < Some(prerelease_bump_instruction.bump_type)
+                    if e.prerelease.as_ref().map(|i| i.bump_type())
+                        < Some(prerelease_bump_instruction.bump_type())
                     {
                         *e = bump_node.clone()
                     }
@@ -208,16 +282,17 @@ impl<'a> BumpTree<'a> {
             if let (Some(stable_child_package), Some(stable_parent_instruction)) =
                 (stable_child_package, stable_parent_bump_instruction)
             {
-                match stable_parent_instruction.bump_type {
+                let cur_version = stable_child_package.borrow().version();
+                match stable_parent_instruction.bump_type() {
                     // Parent breaking change
                     BumpType::Major => Some(BumpInstruction {
                         package: stable_child_package.clone(),
-                        bump_type: BumpType::Major,
+                        next_version: cur_version.bump(BumpType::Major),
                     }),
                     // Parent compatible change
                     BumpType::Minor | BumpType::Patch => Some(BumpInstruction {
                         package: stable_child_package.clone(),
-                        bump_type: BumpType::Patch,
+                        next_version: cur_version.bump(BumpType::Patch),
                     }),
                 }
             } else {
@@ -253,24 +328,25 @@ impl<'a> BumpTree<'a> {
 
         let stable_bump_details = if let Some(i) = &node.stable {
             let cur = i.package.borrow().version();
-            let next = cur.bump(i.bump_type, ReleaseChannel::Stable);
-            let color = match i.bump_type {
+            let color = match i.bump_type() {
                 BumpType::Major => RED,
                 _ => BLUE,
             };
-            format!(" stable({}{} -> {}{})", color, cur, next, RESET)
+            format!(" stable({}{} -> {}{})", color, cur, i.next_version, RESET)
         } else {
             "".to_string()
         };
 
         let prerelease_bump_details = if let Some(i) = &node.prerelease {
             let cur = i.package.borrow().version();
-            let next = cur.bump(i.bump_type, ReleaseChannel::Prerelease);
-            let color = match i.bump_type {
+            let color = match i.bump_type() {
                 BumpType::Major => RED,
                 _ => BLUE,
             };
-            format!(" prerelease({}{} -> {}{})", color, cur, next, RESET)
+            format!(
+                " prerelease({}{} -> {}{})",
+                color, cur, i.next_version, RESET
+            )
         } else {
             "".to_string()
         };
@@ -295,8 +371,8 @@ impl<'a> BumpTree<'a> {
             .filter(|c| {
                 let highest_stable_child = self.highest_stable.get(&c.package_name());
                 let highest_prerelease_child = self.highest_prerelease.get(&c.package_name());
-                return highest_stable_child.is_some_and(|highest| Rc::ptr_eq(c, highest))
-                    || highest_prerelease_child.is_some_and(|highest| Rc::ptr_eq(c, highest));
+                highest_stable_child.is_some_and(|highest| Rc::ptr_eq(c, highest))
+                    || highest_prerelease_child.is_some_and(|highest| Rc::ptr_eq(c, highest))
             })
             .collect::<Vec<_>>();
         for (i, dependent) in significant_children.iter().enumerate() {
@@ -313,73 +389,77 @@ impl<'a> BumpTree<'a> {
 /// It also requires a stable package to exist for this child, otherwise the prerelease
 /// isn't being bumped in relation to anything.
 fn compute_prerelease_bump_instruction(
-    prerelease_child_package: Option<&Rc<RefCell<Package>>>,
-    stable_child_package: Option<&Rc<RefCell<Package>>>,
+    prerelease_package: Option<&Rc<RefCell<Package>>>,
+    stable_package: Option<&Rc<RefCell<Package>>>,
     stable_bump_instruction: Option<&BumpInstruction>,
     prerelease_parent_bump_instruction: Option<&BumpInstruction>,
 ) -> Option<BumpInstruction> {
-    if let (Some(prerelease_child_package), Some(stable_child_package)) =
-        (prerelease_child_package, stable_child_package)
-    {
-        // First candidate for the bump type is based on the bump type of stable
-        let candidate1 = match stable_bump_instruction.map(|i| i.bump_type) {
-            // Prerelease API got broken relative to the stable change
-            Some(BumpType::Major) | Some(BumpType::Minor) => Some(BumpType::Major),
-            // Prerelease API compatible with the stable change
-            Some(BumpType::Patch) => Some(BumpType::Patch),
-            None => None,
-        };
+    // If there's no prerelease package, there's nothing to bump
+    let prerelease_package = match prerelease_package {
+        Some(p) => p,
+        None => return None,
+    };
+    let cur_prerelease_version = prerelease_package.borrow().version();
 
-        // Second candidate for the bump type is based on the bump type of the prerelease parent
-        let candidate2 =
-            if let Some(prerelease_parent_instruction) = prerelease_parent_bump_instruction {
-                match prerelease_parent_instruction.bump_type {
-                    // Parent breaking change
-                    BumpType::Major => Some(BumpType::Major),
-                    // Parent compatible change
-                    BumpType::Minor | BumpType::Patch => Some(BumpType::Patch),
+    // If there's no stable package, then there's no reason to bump the prerelease version because
+    // its current version is already ready to release to stable.
+    let stable_package = match stable_package {
+        Some(p) => p,
+        None => return None,
+    };
+    let cur_stable_version = stable_package.borrow().version();
+
+    // First candidate for the bump type is based on the bump type required of the prerelease
+    // package to remain semver compliant relative to the new stable version.
+    let candidate1 = stable_bump_instruction
+        .map(|i| {
+            match i.bump_type() {
+                // Prerelease API is broken relative to stable. Need to major bump prerelease relative to
+                // stable.
+                BumpType::Major | BumpType::Minor => {
+                    Some(i.next_version.bump(BumpType::Major).with_prerelease())
                 }
-            } else {
-                None
-            };
-
-        let highest_candidate = match (candidate1, candidate2) {
-            (Some(c1), Some(c2)) => Some(std::cmp::max(c1, c2)),
-            (Some(c1), None) => Some(c1),
-            (None, Some(c2)) => Some(c2),
-            (None, None) => None,
-        };
-
-        // If we have a bump type to consider, only apply it if it hasn't yet
-        let stable_version = stable_child_package.borrow().version();
-        let prerelease_version = prerelease_child_package.borrow().version();
-        let final_bump_type = match highest_candidate {
-            Some(BumpType::Major) if prerelease_version.major == stable_version.major => {
-                Some(BumpType::Major)
+                // Stable API is not breaking relative to stable, so we can just bump the prerelease by
+                // a patch to keep pace with the change in stable. But only if prerelease is not
+                // already ahead of stable by minor or major.
+                BumpType::Patch => {
+                    if cur_prerelease_version.major == cur_stable_version.major
+                        && cur_prerelease_version.minor == cur_stable_version.minor
+                    {
+                        Some(i.next_version.bump(BumpType::Patch).with_prerelease())
+                    } else {
+                        None
+                    }
+                }
             }
-            Some(BumpType::Minor)
-                if prerelease_version.major == stable_version.major
-                    && prerelease_version.minor == stable_version.minor =>
-            {
-                Some(BumpType::Minor)
-            }
-            Some(BumpType::Patch)
-                if prerelease_version.major == stable_version.major
-                    && prerelease_version.minor == stable_version.minor
-                    && prerelease_version.patch == stable_version.patch =>
-            {
-                Some(BumpType::Patch)
-            }
-            _ => None,
-        };
-
-        final_bump_type.map(|bump_type| BumpInstruction {
-            package: prerelease_child_package.clone(),
-            bump_type,
         })
-    } else {
-        None
-    }
+        .flatten();
+
+    // Second candidate for the bump type is based on the bump type of the prerelease parent
+    let candidate2 = prerelease_parent_bump_instruction.map(|i| {
+        match i.bump_type() {
+            // Parent breaking change. Bump if not already bumped to be the stable version + major.
+            BumpType::Major => cur_prerelease_version
+                .bump(BumpType::Major)
+                .with_prerelease(),
+            // Parent compatible change
+            BumpType::Minor | BumpType::Patch => cur_prerelease_version
+                .bump(BumpType::Patch)
+                .with_prerelease(),
+        }
+    });
+
+    let highest_candidate = match (candidate1.clone(), candidate2.clone()) {
+        (Some(c1), Some(c2)) => Some(std::cmp::max(c1, c2)),
+        (Some(c1), None) => Some(c1),
+        (None, Some(c2)) => Some(c2),
+        (None, None) => None,
+    };
+
+    highest_candidate.map(|v| BumpInstruction {
+        package: prerelease_package.clone(),
+        next_version: v,
+    })
 }
 
 impl BumpNode {
