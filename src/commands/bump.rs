@@ -1,4 +1,5 @@
-use crate::common::bump_tree::{BumpInstruction, BumpTree, ReleaseChannel};
+use crate::common::bump_tree::instruction::BumpInstruction;
+use crate::common::bump_tree::tree::{BumpTree, ReleaseChannel};
 use crate::common::logging::{self, Color};
 use crate::common::workspace::{self};
 
