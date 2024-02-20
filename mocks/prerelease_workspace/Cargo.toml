@@ -8,4 +8,7 @@ members = [
   "prerelease-ahead-patch",
   "prerelease-matches-stable-0-1-0",
   "prerelease-matches-stable-1-0-0",
+  "a",
+  "b",
+  "c"
 ]

@@ -3,32 +3,22 @@
 version = 3
 
 [[package]]
-name = "a0-1-0"
+name = "a"
 version = "0.1.0"
 
 [[package]]
-name = "a0-1-1"
-version = "0.1.1"
+name = "b"
+version = "0.1.0"
+dependencies = [
+ "a",
+]
 
 [[package]]
-name = "a0-2-0"
-version = "0.2.0"
-
-[[package]]
-name = "a1-0-0"
-version = "1.0.0"
-
-[[package]]
-name = "a1-0-1"
-version = "1.0.1"
-
-[[package]]
-name = "a1-1-0"
-version = "1.1.0"
-
-[[package]]
-name = "a2-0-0"
-version = "2.0.0"
+name = "c"
+version = "0.1.0"
+dependencies = [
+ "b",
+]
 
 [[package]]
 name = "prerelease-ahead-major"
@@ -51,5 +41,29 @@ name = "prerelease-matches-stable-1-0-0"
 version = "1.0.0"
 
 [[package]]
+name = "stable-only-0-1-0"
+version = "0.1.0"
+
+[[package]]
+name = "stable-only-0-1-1"
+version = "0.1.1"
+
+[[package]]
+name = "stable-only-0-2-0"
+version = "0.2.0"
+
+[[package]]
 name = "stable-only-1-0-0"
 version = "1.0.0"
+
+[[package]]
+name = "stable-only-1-0-1"
+version = "1.0.1"
+
+[[package]]
+name = "stable-only-1-1-0"
+version = "1.1.0"
+
+[[package]]
+name = "stable-only-2-0-0"
+version = "2.0.0"

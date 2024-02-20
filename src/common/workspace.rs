@@ -30,7 +30,7 @@ pub struct Workspace {
 
 impl Workspace {
     #[cfg(test)]
-    pub fn new_test_workspace(workspace_path: &PathBuf) -> Result<Self, String> {
+    pub fn new_test_workspace(workspace_path: PathBuf) -> Result<Self, String> {
         let cargo_toml_path = workspace_path.join("Cargo.toml");
 
         log::info!("⏳Building workspace for path {:?}...", &cargo_toml_path,);
@@ -43,7 +43,7 @@ impl Workspace {
     }
 
     pub fn new(
-        workspace_path: &PathBuf,
+        workspace_path: PathBuf,
         branch_name: Option<&str>,
         remote_name: &str,
     ) -> Result<Self, String> {
@@ -92,7 +92,7 @@ impl Workspace {
     }
 
     fn create_packages_and_workspace(
-        workspace_path: &PathBuf,
+        workspace_path: PathBuf,
         branch_name: &str,
         remote_name: &str,
     ) -> Result<Self, String> {
@@ -162,7 +162,7 @@ impl Workspace {
 
         let w = Workspace {
             packages: workspace_package_map,
-            path: workspace_path.clone(),
+            path: workspace_path,
             branch_name: branch_name.to_owned(),
             remote_name: remote_name.to_owned(),
         };

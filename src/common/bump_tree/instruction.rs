@@ -199,37 +199,36 @@ pub fn compute_prerelease_bump_instruction(
                 ),
                 // Stable API is not breaking relative to stable, so we can just bump the prerelease by
                 // a patch to keep pace with the change in stable. But only if prerelease is not
-                // already ahead of stable by minor or major.
-                BumpType::Patch => {
-                    if cur_prerelease_version.major == cur_stable_version.major
-                        && cur_prerelease_version.minor == cur_stable_version.minor
-                    {
-                        Some(
-                            i.next_version
-                                .bump(BumpType::Patch, EndUserInitiated::No)
-                                .with_prerelease(),
-                        )
-                    } else {
-                        None
-                    }
-                }
+                // already ahead of stable by minor or major or patch.
+                BumpType::Patch => Some(
+                    i.next_version
+                        .bump(BumpType::Patch, EndUserInitiated::No)
+                        .with_prerelease(),
+                ),
             }
         })
         .flatten();
 
     // Second candidate for the bump type is based on the bump type of the prerelease parent
-    let candidate2 = prerelease_parent_bump_instruction.map(|i| {
-        match i.bump_type() {
-            // Parent breaking change. Bump if not already bumped to be the stable version + major.
-            BumpType::Major => cur_prerelease_version
-                .bump(BumpType::Major, EndUserInitiated::No)
-                .with_prerelease(),
-            // Parent compatible change
-            BumpType::Minor | BumpType::Patch => cur_prerelease_version
-                .bump(BumpType::Patch, EndUserInitiated::No)
-                .with_prerelease(),
-        }
-    });
+    let candidate2 = prerelease_parent_bump_instruction
+        .map(|i| {
+            match i.bump_type() {
+                // Parent breaking change. Bump if not already bumped to be the stable version + major.
+                BumpType::Major => Some(
+                    cur_stable_version
+                        .bump(BumpType::Major, EndUserInitiated::No)
+                        .with_prerelease(),
+                ),
+                // Parent compatible change. Bump if not already bumped to be the stable major
+                // minor or patch
+                BumpType::Minor | BumpType::Patch => Some(
+                    cur_stable_version
+                        .bump(BumpType::Patch, EndUserInitiated::No)
+                        .with_prerelease(),
+                ),
+            }
+        })
+        .flatten();
 
     let highest_candidate = match (candidate1.clone(), candidate2.clone()) {
         (Some(c1), Some(c2)) => Some(std::cmp::max(c1, c2)),
@@ -238,10 +237,19 @@ pub fn compute_prerelease_bump_instruction(
         (None, None) => None,
     };
 
-    highest_candidate.map(|v| BumpInstruction {
-        package: prerelease_package.clone(),
-        next_version: v,
-    })
+    highest_candidate
+        .map(|v| {
+            // Only return if current prerelease is not higher than our highest candidate here.
+            if cur_prerelease_version >= v {
+                None
+            } else {
+                Some(BumpInstruction {
+                    package: prerelease_package.clone(),
+                    next_version: v,
+                })
+            }
+        })
+        .flatten()
 }
 
 impl Display for BumpTree<'_> {

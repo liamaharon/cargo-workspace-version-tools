@@ -82,7 +82,7 @@ async fn run() -> Result<(), String> {
     let remote_name = matches
         .get_one::<String>("git-remote")
         .expect("--git-remote is required");
-    let mut workspace = Workspace::new(&workspace_path, None, remote_name)?;
+    let mut workspace = Workspace::new(workspace_path.clone(), None, remote_name)?;
 
     match matches.subcommand() {
         Some(("sync", _)) => {
@@ -105,7 +105,7 @@ async fn run() -> Result<(), String> {
                 Some(("stable", matches)) => {
                     let prerelease_workspace = matches
                         .get_one::<String>("prerelease-branch")
-                        .map(|b| Workspace::new(&workspace_path, Some(b.as_str()), remote_name));
+                        .map(|b| Workspace::new(workspace_path, Some(b.as_str()), remote_name));
 
                     let prerelease_workspace = match prerelease_workspace {
                         Some(Ok(prerelease_workspace)) => Some(prerelease_workspace),
@@ -128,7 +128,7 @@ async fn run() -> Result<(), String> {
                 Some(("prerelease", matches)) => {
                     let stable_workspace = matches
                         .get_one::<String>("stable-branch")
-                        .map(|b| Workspace::new(&workspace_path, Some(b.as_str()), remote_name));
+                        .map(|b| Workspace::new(workspace_path, Some(b.as_str()), remote_name));
 
                     let stable_workspace = match stable_workspace {
                         Some(Ok(w)) => Some(w),

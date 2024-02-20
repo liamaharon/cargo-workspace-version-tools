@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Formatter;
 use std::{cell::RefCell, rc::Rc};
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ReleaseChannel {
     Stable,
     Prerelease,

@@ -1,41 +1,17 @@
-use std::{path::Path, str::FromStr};
-
+use crate::common::bump_tree::tests::common::get_mock_workspaces;
+use crate::common::{bump_tree::instruction::BumpInstruction, version_extension::BumpType};
 use semver::Version;
-
-use crate::common::{
-    bump_tree::instruction::BumpInstruction, version_extension::BumpType, workspace::Workspace,
-};
-
-fn get_mock_workspaces() -> (Workspace, Workspace) {
-    let mocks_root = Path::new(&file!())
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("mocks");
-
-    (
-        Workspace::new_test_workspace(&mocks_root.join("stable_workspace")).unwrap(),
-        Workspace::new_test_workspace(&mocks_root.join("prerelease_workspace")).unwrap(),
-    )
-}
+use std::str::FromStr;
 
 pub mod bump_type {
+
     use super::*;
 
     #[test]
     fn handles_versions_with_major() {
         let (stable_workspace, _) = get_mock_workspaces();
 
-        let package = stable_workspace.packages.get("a1-0-0").unwrap();
-        let version = package.borrow().version().clone();
-        assert_eq!(version, Version::from_str("1.0.0").unwrap());
+        let package = stable_workspace.packages.get("stable-only-1-0-0").unwrap();
 
         let major_bump_instruction = BumpInstruction {
             package: package.clone(),
@@ -60,9 +36,7 @@ pub mod bump_type {
     fn handles_versions_without_major() {
         let (stable_workspace, _) = get_mock_workspaces();
 
-        let package = stable_workspace.packages.get("a0-1-0").unwrap();
-        let version = package.borrow().version().clone();
-        assert_eq!(version, Version::from_str("0.1.0").unwrap());
+        let package = stable_workspace.packages.get("stable-only-0-1-0").unwrap();
 
         let major_bump_instruction = BumpInstruction {
             package: package.clone(),
