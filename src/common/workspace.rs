@@ -29,6 +29,19 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    #[cfg(test)]
+    pub fn new_test_workspace(workspace_path: &PathBuf) -> Result<Self, String> {
+        let cargo_toml_path = workspace_path.join("Cargo.toml");
+
+        log::info!("⏳Building workspace for path {:?}...", &cargo_toml_path,);
+
+        let w = Self::create_packages_and_workspace(workspace_path, "no-git", "no-git")?;
+
+        log::info!("Workspace built ✅");
+
+        Ok(w)
+    }
+
     pub fn new(
         workspace_path: &PathBuf,
         branch_name: Option<&str>,
@@ -70,6 +83,21 @@ impl Workspace {
         //     do_fetch(&repo, &[&branch_name], &mut remote).map_err(|e| format!("{}", e))?;
         // do_fast_forward(&repo, &branch_name, fetch_commit).map_err(|e| format!("{}", e))?;
 
+        let w =
+            Self::create_packages_and_workspace(workspace_path, branch_name.as_str(), remote_name)?;
+
+        log::info!("Workspace built ✅");
+
+        Ok(w)
+    }
+
+    fn create_packages_and_workspace(
+        workspace_path: &PathBuf,
+        branch_name: &str,
+        remote_name: &str,
+    ) -> Result<Self, String> {
+        let cargo_toml_path = workspace_path.join("Cargo.toml");
+
         // Create the Packages
         let metadata = MetadataCommand::new()
             .manifest_path(&cargo_toml_path)
@@ -84,7 +112,7 @@ impl Workspace {
         let workspace_package_map = cargo_metadata_members
             .iter()
             .map(|p| {
-                Package::new(&p, &workspace_member_names, branch_name.as_str())
+                Package::new(&p, &workspace_member_names, "no-git")
                     .map_err(|e| format!("Failed to load package at {:?}: {}", p, e))
             })
             .fold(HashMap::new(), |mut acc, package_result| {
@@ -135,7 +163,7 @@ impl Workspace {
         let w = Workspace {
             packages: workspace_package_map,
             path: workspace_path.clone(),
-            branch_name,
+            branch_name: branch_name.to_owned(),
             remote_name: remote_name.to_owned(),
         };
 

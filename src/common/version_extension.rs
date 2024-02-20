@@ -8,6 +8,12 @@ pub enum BumpType {
     Patch,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EndUserInitiated {
+    Yes,
+    No,
+}
+
 impl BumpType {
     pub fn from_str(s: &str) -> Result<Self, String> {
         match s.to_lowercase().as_str() {
@@ -42,24 +48,37 @@ impl Ord for BumpType {
 }
 
 pub trait VersionExtension {
-    fn bump(self: &Self, bump_type: BumpType) -> Version;
+    fn bump(self: &Self, bump_type: BumpType, end_user_initiated: EndUserInitiated) -> Version;
     fn with_prerelease(self: &Self) -> Version;
 }
 
 impl VersionExtension for Version {
-    fn bump(self: &Self, bump_type: BumpType) -> Version {
+    fn bump(self: &Self, bump_type: BumpType, end_user_initiated: EndUserInitiated) -> Version {
         let mut next_version = self.clone();
         match bump_type {
-            BumpType::Major => {
-                if self.major > 0 {
+            BumpType::Major => match end_user_initiated {
+                // If the end-user initiated the bump, we assume they are intentional in requesting
+                // to bump to at least v1.0.0
+                EndUserInitiated::Yes => {
                     next_version.major += 1;
                     next_version.minor = 0;
-                } else {
-                    next_version.minor += 1;
+                    next_version.patch = 0;
                 }
-                next_version.patch = 0;
-            }
+                // Otherwise, we can make a 'major' (incompatible) bump by just bumping minor
+                EndUserInitiated::No => {
+                    if self.major > 0 {
+                        next_version.major += 1;
+                        next_version.minor = 0;
+                    } else {
+                        next_version.minor += 1;
+                    }
+                    next_version.patch = 0;
+                }
+            },
             BumpType::Minor => {
+                if end_user_initiated == EndUserInitiated::Yes && self.major == 0 {
+                    log::info!("ℹ Note: Bumping minor on a package with a major version of 0 is a breaking change. You may consider making a major or patch bump instead.");
+                }
                 next_version.minor += 1;
                 next_version.patch = 0;
             }

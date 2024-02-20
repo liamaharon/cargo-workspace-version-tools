@@ -1,5 +1,5 @@
 use super::tree::{BumpTree, ReleaseChannel};
-use crate::common::version_extension::VersionExtension;
+use crate::common::version_extension::{EndUserInitiated, VersionExtension};
 use crate::common::workspace::Workspace;
 use crate::common::{package::Package, version_extension::BumpType};
 use semver::Version;
@@ -57,6 +57,10 @@ impl BumpInstruction {
             }
             (None, ReleaseChannel::Prerelease) => {
                 // If there's no stable package for a prerelease bump, there's no need to do anything.
+                log::info!(
+                    "🤙 Prerelease package {} isn't yet on the stable release channel, so there is no need to bump it",
+                    name,
+                );
                 return Ok(None);
             }
         };
@@ -66,7 +70,7 @@ impl BumpInstruction {
             // Stable is easy, just bump the version.
             (ReleaseChannel::Stable, _) => Ok(Some(BumpInstruction {
                 package: stable_package.clone(),
-                next_version: cur_stable_version.bump(semver_part),
+                next_version: cur_stable_version.bump(semver_part, EndUserInitiated::Yes),
             })),
             // Handle no prerelease package when user asking to bump it
             (ReleaseChannel::Prerelease, None) => Err(format!(
@@ -81,6 +85,12 @@ impl BumpInstruction {
                     BumpType::Major => {
                         // Ignore minor bump if already ahead on major
                         if cur_prerelease_version.major > cur_stable_version.major {
+                            log::info!(
+                                "🤙 Prerelease package {} (v{}) is already a major bump ahead of stable (v{}), so there is no need to major bump it",
+                                name,
+                                cur_prerelease_version,
+                                cur_stable_version
+                           );
                             return Ok(None);
                         }
 
@@ -88,7 +98,7 @@ impl BumpInstruction {
                         Ok(Some(BumpInstruction {
                             package: prerelease_package.clone(),
                             next_version: cur_stable_version
-                                .bump(BumpType::Major)
+                                .bump(BumpType::Major, EndUserInitiated::Yes)
                                 .with_prerelease(),
                         }))
                     }
@@ -97,6 +107,12 @@ impl BumpInstruction {
                         if cur_prerelease_version.major > cur_stable_version.major
                             || cur_prerelease_version.minor > cur_stable_version.minor
                         {
+                            log::info!(
+                                "🤙 Prerelease package {} (v{}) is already a minor bump ahead of stable (v{}), so there is no need to minor bump it",
+                                name,
+                                cur_prerelease_version,
+                                cur_stable_version
+                           );
                             return Ok(None);
                         }
 
@@ -104,16 +120,22 @@ impl BumpInstruction {
                         Ok(Some(BumpInstruction {
                             package: prerelease_package.clone(),
                             next_version: cur_stable_version
-                                .bump(BumpType::Minor)
+                                .bump(BumpType::Minor, EndUserInitiated::Yes)
                                 .with_prerelease(),
                         }))
                     }
                     BumpType::Patch => {
-                        // Ignore minor bump if already ahead on major or minor or patch
+                        // Ignore patch bump if already ahead on major or minor or patch
                         if cur_prerelease_version.major > cur_stable_version.major
                             || cur_prerelease_version.minor > cur_stable_version.minor
                             || cur_prerelease_version.patch > cur_stable_version.patch
                         {
+                            log::info!(
+                                "🤙 Prerelease package {} (v{}) is already a patch bump ahead of stable (v{}), so there is no need to patch bump it",
+                                name,
+                                cur_prerelease_version,
+                                cur_stable_version
+                           );
                             return Ok(None);
                         }
 
@@ -121,7 +143,7 @@ impl BumpInstruction {
                         Ok(Some(BumpInstruction {
                             package: prerelease_package.clone(),
                             next_version: cur_stable_version
-                                .bump(BumpType::Patch)
+                                .bump(BumpType::Patch, EndUserInitiated::Yes)
                                 .with_prerelease(),
                         }))
                     }
@@ -170,9 +192,11 @@ pub fn compute_prerelease_bump_instruction(
             match i.bump_type() {
                 // Prerelease API is broken relative to stable. Need to major bump prerelease relative to
                 // stable.
-                BumpType::Major | BumpType::Minor => {
-                    Some(i.next_version.bump(BumpType::Major).with_prerelease())
-                }
+                BumpType::Major | BumpType::Minor => Some(
+                    i.next_version
+                        .bump(BumpType::Major, EndUserInitiated::No)
+                        .with_prerelease(),
+                ),
                 // Stable API is not breaking relative to stable, so we can just bump the prerelease by
                 // a patch to keep pace with the change in stable. But only if prerelease is not
                 // already ahead of stable by minor or major.
@@ -180,7 +204,11 @@ pub fn compute_prerelease_bump_instruction(
                     if cur_prerelease_version.major == cur_stable_version.major
                         && cur_prerelease_version.minor == cur_stable_version.minor
                     {
-                        Some(i.next_version.bump(BumpType::Patch).with_prerelease())
+                        Some(
+                            i.next_version
+                                .bump(BumpType::Patch, EndUserInitiated::No)
+                                .with_prerelease(),
+                        )
                     } else {
                         None
                     }
@@ -194,11 +222,11 @@ pub fn compute_prerelease_bump_instruction(
         match i.bump_type() {
             // Parent breaking change. Bump if not already bumped to be the stable version + major.
             BumpType::Major => cur_prerelease_version
-                .bump(BumpType::Major)
+                .bump(BumpType::Major, EndUserInitiated::No)
                 .with_prerelease(),
             // Parent compatible change
             BumpType::Minor | BumpType::Patch => cur_prerelease_version
-                .bump(BumpType::Patch)
+                .bump(BumpType::Patch, EndUserInitiated::No)
                 .with_prerelease(),
         }
     });

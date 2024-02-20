@@ -2,8 +2,8 @@ use super::instruction::{compute_prerelease_bump_instruction, BumpInstruction};
 use super::node::BumpNode;
 use crate::common::logging::{BLUE, RED, RESET};
 use crate::common::package::Package;
-use crate::common::version_extension::BumpType;
 use crate::common::version_extension::VersionExtension;
+use crate::common::version_extension::{BumpType, EndUserInitiated};
 use crate::common::workspace::Workspace;
 use core::fmt;
 use std::collections::{HashMap, HashSet};
@@ -147,12 +147,12 @@ impl<'a> BumpTree<'a> {
                     // Parent breaking change
                     BumpType::Major => Some(BumpInstruction {
                         package: stable_child_package.clone(),
-                        next_version: cur_version.bump(BumpType::Major),
+                        next_version: cur_version.bump(BumpType::Major, EndUserInitiated::No),
                     }),
                     // Parent compatible change
                     BumpType::Minor | BumpType::Patch => Some(BumpInstruction {
                         package: stable_child_package.clone(),
-                        next_version: cur_version.bump(BumpType::Patch),
+                        next_version: cur_version.bump(BumpType::Patch, EndUserInitiated::No),
                     }),
                 }
             } else {

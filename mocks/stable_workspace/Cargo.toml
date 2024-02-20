@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+
+members = [
+  "a0-1-0",
+  "a0-1-1",
+  "a0-2-0",
+  "a1-0-0",
+  "a1-0-1",
+  "a1-1-0",
+  "a2-0-0",
+  "stable-only-1-0-0",
+  "prerelease-ahead-major",
+  "prerelease-ahead-minor",
+  "prerelease-ahead-patch",
+  "prerelease-matches-stable-0-1-0",
+  "prerelease-matches-stable-1-0-0",
+]
