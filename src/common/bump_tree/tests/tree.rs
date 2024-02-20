@@ -39,14 +39,17 @@ fn run_bump_tree_assertion(
     }
 
     // Build bump tree
-    let root_nodes = vec![BumpInstruction::from_str(
+    let root_nodes = match BumpInstruction::from_str(
         &stable_workspace,
         &prerelease_workspace,
         &raw_bump_instruction,
         release_channel,
     )
     .unwrap()
-    .unwrap()];
+    {
+        Some(i) => vec![i],
+        None => vec![],
+    };
     let tree = BumpTree::new(
         &stable_workspace,
         &prerelease_workspace,
@@ -97,6 +100,247 @@ fn run_bump_tree_assertion(
                 )
             }
         };
+    }
+}
+
+pub mod prerelease {
+    use super::*;
+
+    pub mod major {
+        use super::*;
+
+        #[test]
+        fn success_when_matches_stable() {
+            run_bump_tree_assertion(
+                "a major",
+                vec![VersionChangeAssertion {
+                    package_name: "a".to_owned(),
+                    initial_stable_version: Some(Version::from_str("1.0.0").unwrap()),
+                    initial_prerelease_version: Some(Version::from_str("1.0.0").unwrap()),
+                    expected_stable_version: None,
+                    expected_prerelease_version: Some(Version::from_str("2.0.0-alpha").unwrap()),
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+
+        #[test]
+        fn noop_when_already_ahead_by_major() {
+            run_bump_tree_assertion(
+                "a major",
+                vec![VersionChangeAssertion {
+                    package_name: "a".to_owned(),
+                    initial_stable_version: Some(Version::from_str("1.0.0").unwrap()),
+                    initial_prerelease_version: Some(Version::from_str("2.0.0-alpha").unwrap()),
+                    expected_stable_version: None,
+                    expected_prerelease_version: None,
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+
+        #[test]
+        fn noop_when_already_ahead_by_minor() {
+            run_bump_tree_assertion(
+                "a major",
+                vec![VersionChangeAssertion {
+                    package_name: "a".to_owned(),
+                    initial_stable_version: Some(Version::from_str("1.0.0").unwrap()),
+                    initial_prerelease_version: Some(Version::from_str("1.1.0-alpha").unwrap()),
+                    expected_stable_version: None,
+                    expected_prerelease_version: Some(Version::from_str("2.0.0-alpha").unwrap()),
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+
+        #[test]
+        fn success_when_already_ahead_by_patch() {
+            run_bump_tree_assertion(
+                "a major",
+                vec![VersionChangeAssertion {
+                    package_name: "a".to_owned(),
+                    initial_stable_version: Some(Version::from_str("1.0.0").unwrap()),
+                    initial_prerelease_version: Some(Version::from_str("1.0.1-alpha").unwrap()),
+                    expected_stable_version: None,
+                    expected_prerelease_version: Some(Version::from_str("2.0.0-alpha").unwrap()),
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+
+        #[test]
+        fn noop_when_no_stable() {
+            run_bump_tree_assertion(
+                "prerelease-only-1-0-0 major",
+                vec![VersionChangeAssertion {
+                    package_name: "prerelease-only-1-0-0".to_owned(),
+                    initial_stable_version: None,
+                    initial_prerelease_version: None,
+                    expected_stable_version: None,
+                    expected_prerelease_version: None,
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+    }
+
+    pub mod minor {
+        use super::*;
+
+        #[test]
+        fn success_when_matches_stable() {
+            run_bump_tree_assertion(
+                "a minor",
+                vec![VersionChangeAssertion {
+                    package_name: "a".to_owned(),
+                    initial_stable_version: Some(Version::from_str("1.0.0").unwrap()),
+                    initial_prerelease_version: Some(Version::from_str("1.0.0").unwrap()),
+                    expected_stable_version: None,
+                    expected_prerelease_version: Some(Version::from_str("1.1.0-alpha").unwrap()),
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+
+        #[test]
+        fn noop_when_already_ahead_by_major() {
+            run_bump_tree_assertion(
+                "a minor",
+                vec![VersionChangeAssertion {
+                    package_name: "a".to_owned(),
+                    initial_stable_version: Some(Version::from_str("1.0.0").unwrap()),
+                    initial_prerelease_version: Some(Version::from_str("2.0.0-alpha").unwrap()),
+                    expected_stable_version: None,
+                    expected_prerelease_version: None,
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+
+        #[test]
+        fn noop_when_already_ahead_by_minor() {
+            run_bump_tree_assertion(
+                "a minor",
+                vec![VersionChangeAssertion {
+                    package_name: "a".to_owned(),
+                    initial_stable_version: Some(Version::from_str("1.0.0").unwrap()),
+                    initial_prerelease_version: Some(Version::from_str("1.1.0-alpha").unwrap()),
+                    expected_stable_version: None,
+                    expected_prerelease_version: None,
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+
+        #[test]
+        fn success_when_already_ahead_by_patch() {
+            run_bump_tree_assertion(
+                "a minor",
+                vec![VersionChangeAssertion {
+                    package_name: "a".to_owned(),
+                    initial_stable_version: Some(Version::from_str("1.0.0").unwrap()),
+                    initial_prerelease_version: Some(Version::from_str("1.0.1-alpha").unwrap()),
+                    expected_stable_version: None,
+                    expected_prerelease_version: Some(Version::from_str("1.1.0-alpha").unwrap()),
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+
+        #[test]
+        fn noop_when_no_stable() {
+            run_bump_tree_assertion(
+                "prerelease-only-1-0-0 minor",
+                vec![VersionChangeAssertion {
+                    package_name: "prerelease-only-1-0-0".to_owned(),
+                    initial_stable_version: None,
+                    initial_prerelease_version: None,
+                    expected_stable_version: None,
+                    expected_prerelease_version: None,
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+    }
+
+    pub mod patch {
+        use super::*;
+
+        #[test]
+        fn success_when_matches_stable() {
+            run_bump_tree_assertion(
+                "a patch",
+                vec![VersionChangeAssertion {
+                    package_name: "a".to_owned(),
+                    initial_stable_version: Some(Version::from_str("1.0.0").unwrap()),
+                    initial_prerelease_version: Some(Version::from_str("1.0.0").unwrap()),
+                    expected_stable_version: None,
+                    expected_prerelease_version: Some(Version::from_str("1.0.1-alpha").unwrap()),
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+
+        #[test]
+        fn noop_when_already_ahead_by_major() {
+            run_bump_tree_assertion(
+                "a patch",
+                vec![VersionChangeAssertion {
+                    package_name: "a".to_owned(),
+                    initial_stable_version: Some(Version::from_str("1.0.0").unwrap()),
+                    initial_prerelease_version: Some(Version::from_str("2.0.0-alpha").unwrap()),
+                    expected_stable_version: None,
+                    expected_prerelease_version: None,
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+
+        #[test]
+        fn noop_when_already_ahead_by_minor() {
+            run_bump_tree_assertion(
+                "a patch",
+                vec![VersionChangeAssertion {
+                    package_name: "a".to_owned(),
+                    initial_stable_version: Some(Version::from_str("1.0.0").unwrap()),
+                    initial_prerelease_version: Some(Version::from_str("1.1.0-alpha").unwrap()),
+                    expected_stable_version: None,
+                    expected_prerelease_version: None,
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+
+        #[test]
+        fn noop_when_already_ahead_by_patch() {
+            run_bump_tree_assertion(
+                "a patch",
+                vec![VersionChangeAssertion {
+                    package_name: "a".to_owned(),
+                    initial_stable_version: Some(Version::from_str("1.0.0").unwrap()),
+                    initial_prerelease_version: Some(Version::from_str("1.0.1-alpha").unwrap()),
+                    expected_stable_version: None,
+                    expected_prerelease_version: None,
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
+
+        #[test]
+        fn noop_when_no_stable() {
+            run_bump_tree_assertion(
+                "prerelease-only-1-0-0 patch",
+                vec![VersionChangeAssertion {
+                    package_name: "prerelease-only-1-0-0".to_owned(),
+                    initial_stable_version: None,
+                    initial_prerelease_version: None,
+                    expected_stable_version: None,
+                    expected_prerelease_version: None,
+                }],
+                ReleaseChannel::Prerelease,
+            );
+        }
     }
 }
 
